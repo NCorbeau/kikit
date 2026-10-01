@@ -4,7 +4,7 @@
 
 Kikit is a small, polished block editor for persistent personal notes. It is also a learning project: its editing, local persistence, authorization, synchronization, and recovery should be inspectable end to end.
 
-The repository is currently documentation only. Do not claim that the application, tests, dependencies, or deployment exist. Implement the next agreed slice rather than interpreting a planning discussion as authorization to build the entire system.
+The first local development milestone now implements the editor, IndexedDB journal, custom synchronization, PostgreSQL persistence, and automated checks. Accounts and production deployment are not implemented. Implement the next agreed slice rather than interpreting a planning discussion as authorization to build the entire system.
 
 ## Product scope
 

@@ -24,10 +24,30 @@ Admission is bounded by count and bytes per page and globally; socket output is 
 
 `packages/contracts`: wire types, versions, constants and binary codec (lead owns).
 
-`apps/web/src/session`: LocalStore, DocumentSession and SyncClient (local persistence owner). Public entry exports `createDocumentSession()` returning a DocumentSession with `doc: Y.Doc`, `start(): Promise<void>`, `subscribe(listener): () => void`, `getSnapshot(): SessionSnapshot`, `retry(): void`, `exportRecovery(): string`, `destroy(): void`. Snapshot is referentially stable until changed and has `{ready:boolean, connection:'connecting'|'online'|'offline'|'error', local:'saving'|'saved'|'error', pending:number, serverSaved:boolean, error:string|null}`. Default fixture IDs come from shared constants to open cached notes offline; live endpoint must verify them before connecting. Ready requires successful cache hydration or server initialization. Session owns doc lifetime. UI mounts editors after ready and unmounts before destroy.
+`apps/web/src/session`: LocalStore, DocumentSession and SyncClient. Public entry exports `createDocumentSession()` returning a DocumentSession with `doc: Y.Doc`, `start(): Promise<void>`, `subscribe(listener): () => void`, `getSnapshot(): SessionSnapshot`, `retry(): void`, `exportRecovery(): string`, `destroy(): void`. Snapshot is referentially stable until changed and has `{ready:boolean, editable:boolean, connection:'connecting'|'online'|'offline'|'error', local:'saving'|'saved'|'error', pending:number, serverSaved:boolean, error:string|null}`. Terminal compatibility/access errors lock editing until verified synchronization succeeds, keeping recovery available. Default fixture IDs come from shared constants to open cached notes offline; live endpoint must verify them before connecting. Ready requires successful cache hydration or server initialization. Session owns doc lifetime. UI mounts editors after ready and unmounts before destroy.
 
 `apps/web/src/editor`, `App.tsx`, `styles.css`, `main.tsx`, `index.html`: UI/editor owner. UI derives all editable content from Y.Doc. No shadow editable React copy. Distinct labels for saving locally, saved on this device, saved to server, offline and errors. Provide recovery download and retry on failure.
 
 `apps/server/src`: backend owner. `createServer()` exported from `app.ts` for test harness; `main.ts` runs server; `migrate.ts` applies SQL and seeds fixture. PostgreSQL default local URL is `postgres://kikit:kikit_local_only@127.0.0.1:54329/kikit`, overridden by DATABASE_URL; default server port 3001; default browser origin http://127.0.0.1:5173. Test failure hooks, if needed, must require NODE_ENV=test AND KIKIT_TEST_FAULTS=1 and loopback, and never exist in development/production routes.
 
 Lead owns all package manifests, lockfile, root config, Vite config, end-to-end tests and delivery documentation. Owners may add tests within their source directories. Communicate interface changes before implementation.
+
+## Concrete recovery decisions
+
+IndexedDB `updates` uses an auto-increment primary key for insertion order and a unique `id` index for immutable batch identities. Update bytes, the pending flag, and initialization metadata commit together with strict durability requested. Acknowledgements change only the pending flag. Multiple tabs can replay the same pending identity safely; fresh browser contexts communicate exclusively through the backend. No IndexedDB cache deletion is automatic.
+
+A local append failure and a failed local acknowledgement write are tracked separately. Receipt success for an older batch cannot clear a newer append failure. Unpersisted edits are retained in memory, included in recovery export, and protected by a before-unload warning; no reload guarantee is made until their IndexedDB transaction completes.
+
+The server validates candidate CRDT state before storing a new batch, retaining the room unchanged until COMMIT. Missing causal dependencies produce a retryable error. Receipt lookup precedes candidate validation for duplicate identities. SHA-256 covers the exact update bytes. A conflict never changes a receipt or creates another update.
+
+An exception while committing may mean COMMIT succeeded without a readable response. The server closes the uncertain room's sockets and discards its in-memory document before processing more work. Reconnection reconstructs from committed bytes; retry returns the original receipt. This also applies when committed room application fails. Peer socket transmission failures disconnect the affected peer; reconnect obtains committed state.
+
+The PostgreSQL schema version is recorded in `schema_versions`. Migrations use a transaction and advisory lock; seed insertion is idempotent and stores its original binary identity in `pages.initial_state`. Runtime server creation does not execute migrations. Local Compose uses one development role for convenience; separate privileged migrations and least-privilege runtime grants are required before production.
+
+The browser shell cache is development-only and excludes all `/api/` requests. It stores no note content. The first connected load warms the shell; subsequent offline navigation can mount a cached page. Schema compatibility remains enforced by the document session even when the shell was cached.
+
+## Library references
+
+- [Tiptap Collaboration](https://tiptap.dev/docs/editor/extensions/functionality/collaboration): fragment binding and collaborative undo.
+- [Tiptap UniqueID](https://tiptap.dev/docs/editor/extensions/functionality/uniqueid): local split/paste IDs and collaboration initialization.
+- [Yjs document updates](https://docs.yjs.dev/api/document-updates): binary updates and merging. CRDT convergence is separate from our durable receipt contract.
