@@ -4,7 +4,19 @@
 
 Kikit is a small, polished block editor for persistent personal notes. It is also a learning project: its editing, local persistence, authorization, synchronization, and recovery should be inspectable end to end.
 
-The first local development milestone now implements the editor, IndexedDB journal, custom synchronization, PostgreSQL persistence, and automated checks. Accounts and production deployment are not implemented. Implement the next agreed slice rather than interpreting a planning discussion as authorization to build the entire system.
+The first local development milestone implements the editor, IndexedDB journal, custom synchronization, PostgreSQL persistence, and automated checks. The account slice is in progress; inspect the current code, working tree, and verification record before describing it as complete. The development identity does not satisfy the authenticated v1 release gate. Production deployment remains future work. Implement the next agreed slice rather than interpreting a planning discussion as authorization to build the entire system.
+
+## Project documentation for agents
+
+Before implementation or a planning update, read `README.md`, `docs/milestone-contract.md`, and the relevant parts of `docs/verification.md`, then inspect the affected code and existing changes. `docs/demos/README.md` records the independent-browser demonstration and its conditions. Distinguish recorded test results from checks run for the current change.
+
+Notion is the product planning hub. If `.codex/project-docs.md` exists, read it for the private hub and document links. Fetch the hub and the documents relevant to the task through the connected Notion tools: Vision & Product Scope for product/UX work; Architecture & Infrastructure for technical boundaries; Build Plan & Quality Gates for sequencing and acceptance; Decisions & Open Trade-offs for accepted choices and unresolved decisions. Treat a planning target as a requirement, not proof of implementation or permission to build it.
+
+Current user instructions and recorded authorization take precedence. Notion records product intent and decisions; repository contracts describe implemented technical behavior; verification records establish evidence only under their stated conditions. Reconcile stale statements against code and tests, and surface material conflicts rather than silently choosing a new scope, login method, provider, budget, or reliability promise. Uncommitted work is not a completed milestone or a recorded product decision. Preserve changes already in progress.
+
+When documentation updates are within the requested scope, keep the hub and affected planning summaries aligned with implementation, date the update, link technical evidence, and separate implemented, in-progress, and deferred work. Otherwise report relevant documentation drift. Do not duplicate detailed technical contracts in Notion or claim unrun checks passed.
+
+Keep `.codex/project-docs.md` ignored and never copy its private workspace links or personal context into tracked files, commits, PRs, public docs, or logs. It is a local reference and is not distributed with a clone. If it or Notion access is unavailable, continue authorized work from repository evidence and report the limitation; request missing context only when a consequential decision depends on it. Do not invent or search for private URLs.
 
 ## Product scope
 
