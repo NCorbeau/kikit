@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 import { DEV_PAGE_ID } from '@kikit/contracts';
 import { migrateDatabase } from '../../apps/server/src/persistence';
+import { seedDevelopmentPage } from '../../apps/server/src/development-seed';
 import {
   pool, server, contexts, startServer, openPage,
   expectServerSaved, appendToBody, openRawSyncConnection, createTitleUpdate,
@@ -15,6 +16,7 @@ test.beforeAll(async () => {
   // This fixed database exists exclusively for this suite. Development notes are untouched.
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
   await migrateDatabase(pool);
+  await seedDevelopmentPage(pool);
   await startServer();
 });
 

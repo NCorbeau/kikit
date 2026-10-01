@@ -1,12 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isLoopback, requireDevelopmentFixture } from './config.js';
 import { createServer } from './app.js';
+import { seedDevelopmentPage } from './development-seed.js';
+import type pg from 'pg';
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
 describe('development fixture boundary', () => {
+
+  it('refuses to seed fixture data outside development/test before connecting', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('KIKIT_DEV_FIXTURE', '1');
+    const connect = vi.fn();
+    await expect(seedDevelopmentPage({ connect } as unknown as pg.Pool)).rejects.toThrow('Production authentication is not implemented');
+    expect(connect).not.toHaveBeenCalled();
+  });
 
   it('fails closed in production even if the fixture flag is enabled', async () => {
     vi.stubEnv('NODE_ENV', 'production');

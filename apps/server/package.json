@@ -6,19 +6,22 @@
     "dev": "NODE_ENV=development KIKIT_DEV_FIXTURE=1 tsx watch src/main.ts",
     "start": "tsx src/main.ts",
     "db:migrate": "NODE_ENV=development KIKIT_DEV_FIXTURE=1 tsx src/migrate.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts"
   },
   "dependencies": {
-    "@kikit/contracts": "workspace:*",
-    "fastify": "5.12.5",
     "@fastify/websocket": "^11.2.0",
-    "pg": "^8.16.0",
+    "@kikit/contracts": "workspace:*",
+    "drizzle-orm": "0.45.3",
+    "fastify": "5.12.5",
     "p-queue": "9.3.3",
-    "yjs": "13.6.33",
-    "ws": "^8.18.0"
+    "pg": "^8.16.0",
+    "ws": "^8.18.0",
+    "yjs": "13.6.33"
   },
   "devDependencies": {
     "@types/pg": "^8.15.0",
-    "@types/ws": "^8.18.0"
+    "@types/ws": "^8.18.0",
+    "drizzle-kit": "0.31.11"
   }
 }

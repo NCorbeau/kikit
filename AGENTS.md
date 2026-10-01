@@ -23,6 +23,7 @@ Do not expand into nested workspaces, drag reordering, databases, attachments, c
 - Node + TypeScript + Fastify for HTTP, authentication, and custom WebSocket sync.
 - Better Auth inside the backend, with authentication records and sessions in PostgreSQL.
 - PostgreSQL for page metadata, access grants, binary document updates, snapshots, and durable receipts.
+- Drizzle ORM for typed database queries and Drizzle Kit for generated, reviewed SQL migration files. Keep transaction and row-lock boundaries explicit; development fixture seeding stays separate from schema migrations.
 - `p-queue` for in-process per-page sequencing.
 - Railway for one active application instance and PostgreSQL in the same environment and region, using private database networking.
 - A pnpm workspace when code is introduced. Initial applications may live in `apps/web` and `apps/server`; extract shared document/protocol contracts only where genuinely shared.

@@ -7,8 +7,8 @@ Verified on 2026-10-01 using macOS/Apple Silicon, Node 24.21.0, pnpm 12.5.1, Doc
 | Command | Result |
 | --- | --- |
 | `pnpm typecheck` | Passed for shared contracts, server, web, test harness and root configuration |
-| `pnpm test` | 33 passed; 7 PostgreSQL integration tests intentionally skipped without opt-in |
-| `pnpm test:integration` | All 7 real PostgreSQL/WebSocket tests passed |
+| `pnpm test` | 34 passed; 13 PostgreSQL integration tests intentionally skipped without opt-in |
+| `pnpm test:integration` | All 13 real PostgreSQL tests passed (7 persistence/WebSocket, 6 migrations) |
 | `pnpm test:e2e` | All 12 Chromium scenarios passed |
 | `pnpm build` | Passed; Vite reports a large editor chunk (725.23 kB before gzip) |
 
@@ -27,7 +27,9 @@ The browser scenarios cover:
 11. Chromium composition events followed by a Unicode commit, synchronized without the intermediate composition text remaining.
 12. Offline clients deleting different remaining paragraphs, convergence to one server-repaired empty paragraph, continued editing, and stable block identity after reload.
 
-Vitest checks additionally cover atomic IndexedDB aborts, namespace isolation, insertion-ordered replay, unsupported cached versions, unpersisted recovery exports, local acknowledgement persistence failure, stale handshakes, terminal readonly state, bounded queues, failed tasks, orderly shutdown, and production fixture denial. PostgreSQL checks exercise atomic rollback, duplicate receipts, concurrent row locking, cross-account denial, lost acknowledgement and uncertain commit recovery.
+Vitest checks additionally cover atomic IndexedDB aborts, namespace isolation, insertion-ordered replay, unsupported cached versions, unpersisted recovery exports, local acknowledgement persistence failure, stale handshakes, terminal readonly state, bounded queues, failed tasks, orderly shutdown, and production fixture denial. PostgreSQL checks exercise atomic rollback, duplicate receipts, concurrent row locking, cross-account denial, lost acknowledgement and uncertain commit recovery. The Drizzle refactor passes these same checks with Buffer-preserving query mappings. Six migration checks cover concurrent/repeated runs, explicit idempotent seeding, adoption of the old schema with stored notes/updates/receipts intact, subsequent-file application, failed DDL rollback, changed/missing history rejection, and newer-schema denial. These checks use temporary schemas and leave development notes untouched. The development seed also has a production-denial unit regression.
+
+The migration workflow was exercised with `pnpm db:generate` (no outstanding schema diff) and `DATABASE_URL=.../kikit_e2e pnpm db:migrate` against the isolated test database. An independent review of the ORM/migration changes found no actionable introduced defects.
 
 ## Manual inspection
 

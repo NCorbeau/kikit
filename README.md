@@ -23,6 +23,21 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Use this exact origin; the 
 
 The Compose username/password are deliberately public local fixture values. They are not production credentials. The local default database URL is `postgres://kikit:kikit_local_only@127.0.0.1:54329/kikit`. Server commands accept an exported `DATABASE_URL`; `PORT` and `KIKIT_ORIGIN` override the server port and exact loopback browser origin. `KIKIT_API_TARGET` overrides Vite's proxy target. Environment files are not loaded automatically by the server.
 
+## Database changes
+
+The backend uses [Drizzle ORM](https://orm.drizzle.team/docs) for typed queries over the existing `pg` driver. Table definitions live in `apps/server/src/schema.ts`; SQL migrations and their generated snapshots live in `apps/server/migrations`.
+
+To change the schema, edit the table definitions, generate a migration, review its SQL, then apply it:
+
+```sh
+pnpm db:generate --name describe_change
+pnpm db:migrate
+```
+
+Commit the SQL file and generated `meta/` files together. Add a new migration for subsequent changes; never edit an applied file. The runner uses Drizzle's migration history, verifies recorded checksums, and locks migration admission so concurrent runs cannot apply the same file twice. Pending SQL and its history entries commit together; failed migrations roll back. The initial baseline adopts the original milestone's local schema without replacing stored notes or receipts.
+
+`pnpm db:migrate` applies schema migrations, then invokes a separate, explicitly development-only seed. Repeated seeding retains the page's original binary identity. The server does not migrate on startup. This workflow currently supports transactional, forward migrations; operations that must run outside a transaction and production migration privileges remain future work.
+
 ## What works
 
 - A collaborative page title, paragraphs, and headings at levels 1–3.
@@ -58,7 +73,10 @@ Page access is checked separately through PostgreSQL grants on handshake and eac
 | `apps/server/src/sync-protocol.ts` | Bounded outgoing messages and protocol error mapping |
 | `apps/server/src/queue.ts` | Bounded per-page sequencing and shutdown admission |
 | `apps/server/src/persistence.ts` | Page access locks, document loading, transactions and receipts |
-| `apps/server/src/migrations.ts` | Transactional SQL migration and one-time server seed |
+| `apps/server/src/schema.ts` | Drizzle table definitions and binary column types |
+| `apps/server/migrations` | Reviewed SQL migration files and generated metadata |
+| `apps/server/src/migrations.ts` | Migration lock, history verification, and Drizzle runner |
+| `apps/server/src/development-seed.ts` | Explicit development-only, idempotent page seed |
 | `packages/contracts` | Versioned wire messages, constants and binary encoding |
 
 1. The editor changes its Y.Doc immediately.
