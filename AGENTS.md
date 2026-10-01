@@ -68,11 +68,23 @@ Namespace browser storage by account and page. Account switching must not reveal
 
 Never commit credentials, real notes, private planning material, or production data. Keep privileged database credentials server-side; use least-privilege runtime access and separate migration privileges. Avoid note text, session tokens, and share secrets in logs.
 
+## Shared pages and invitations
+
+V1 supports concurrent editing by multiple signed-in users. Pages are private by default. Use owner/editor roles: owners manage invitations and membership and may delete pages; editors may read and edit.
+
+The owner creates an unguessable invitation link; QR codes encode the same URL. Store invitation tokens as hashes, keep secrets out of logs, and require an explicit authenticated join action to create editor membership. Make redemption idempotent and coordinate redemption with revocation. A joined page appears in the member's notes across devices.
+
+Disabling or replacing an invitation prevents new joins without removing existing memberships. Removing a member revokes active and future document access. A removed member can rejoin using a valid invitation; invalidate it as well when preventing re-entry is intended. Revocation cannot recall downloaded copies. Preserve recoverable local drafts while rejecting unauthorized synchronization.
+
+Keep identity validation, invitation redemption, and page authorization separate. Guest access is a possible later decision, not an implemented v1 feature. Avoid speculative guest frameworks or authentication bypasses. Include restrained participant indicators and colored cursors, with presence separate from durable content.
+
 ## Delivery and verification
 
 Deliver the smallest complete slice. The first technical proof is a basic page edited through the full local-store/server/database/acknowledgement flow in two independent browser contexts. Validate editor semantics and failure behavior before broadening features.
 
 Use Vitest for meaningful logic/integration checks and Playwright for actual browser/backend scenarios when those tools are introduced. Prioritize concurrent edits, split/merge, offline reload, lost acknowledgement, duplicate delivery, database failure, interrupted commit, snapshot concurrency, incompatible clients, and cross-account denial.
+
+Before declaring v1 complete, use two distinct authenticated accounts to verify invitation redemption, concurrent editing, private-page denial, owner-only controls, duplicate joins, invalidated links, and member revocation on active sockets and offline recovery. A development identity fixture is insufficient for that release gate.
 
 Exercise queue overload, failure, and shutdown. Check keyboard, clipboard, composition input, focus, and collaborative undo. Tests should verify behavior and concrete risks, not mirror implementation details. Do not add redundant tests for documentation-only changes.
 
