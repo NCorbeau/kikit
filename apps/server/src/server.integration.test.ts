@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import * as Y from 'yjs';
-import { DEV_ACCOUNT_ID, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, encodeUpdate, type ServerMessage } from '@kikit/contracts';
+import { DEV_ACCOUNT_ID, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, decodeUpdate, encodeUpdate, type ServerMessage } from '@kikit/contracts';
 import { AccessError, ReceiptConflict, commitUpdate, createPool, loadPage, migrateDatabase } from './persistence.js';
 import { createSeed } from './document.js';
 import { createServer } from './app.js';
@@ -72,6 +72,75 @@ describe.skipIf(!databaseUrl)('PostgreSQL and WebSocket durable flow', () => {
     socket.send(JSON.stringify({ type: 'hello', pageId, protocolVersion: PROTOCOL_VERSION, schemaVersion: DOCUMENT_SCHEMA_VERSION }));
     expect((await next()).type).toBe('sync'); return { socket, next };
   }
+  it('commits an empty-body repair atomically and replays its original bytes under the client payload hash', async () => {
+    const base = new Y.Doc(); Y.applyUpdate(base, seed);
+    const second = new Y.XmlElement('paragraph'); second.setAttribute('id', 'second');
+    base.getXmlFragment('body').insert(1, [second]);
+    seed = Y.encodeStateAsUpdate(base);
+    await pool.query('UPDATE pages SET initial_state=$2 WHERE id=$1', [pageId, Buffer.from(seed)]);
+    const a = new Y.Doc(); const b = new Y.Doc();
+    Y.applyUpdate(a, seed); Y.applyUpdate(b, seed);
+    const vector = Y.encodeStateVector(base);
+    a.getXmlFragment('body').delete(0, 1); b.getXmlFragment('body').delete(1, 1);
+    const firstUpdate = Y.encodeStateAsUpdate(a, vector);
+    const lastUpdate = Y.encodeStateAsUpdate(b, vector);
+    app = await createServer({ databaseUrl }); await app.listen({ host: '127.0.0.1', port: 0 });
+    const first = await connect(); const last = await connect();
+    try {
+      first.socket.send(JSON.stringify({ type: 'update', batchId: randomUUID(), update: encodeUpdate(firstUpdate) }));
+      expect(await first.next()).toMatchObject({ type: 'ack', sequence: 1 });
+      expect(await last.next()).toMatchObject({ type: 'committed', sequence: 1 });
+      const batchId = randomUUID();
+      last.socket.send(JSON.stringify({ type: 'update', batchId, update: encodeUpdate(lastUpdate) }));
+      const repaired = await last.next();
+      expect(repaired).toMatchObject({ type: 'committed', sequence: 2 });
+      expect(await last.next()).toEqual({ type: 'ack', batchId, sequence: 2 });
+      expect(await first.next()).toEqual(repaired);
+      const stored = await pool.query(`SELECT r.payload_hash, u.payload FROM receipts r
+        JOIN document_updates u ON u.page_id=r.page_id AND u.sequence=r.sequence
+        WHERE r.page_id=$1 AND r.batch_id=$2`, [pageId, batchId]);
+      expect(stored.rows[0].payload_hash).toBe(createHash('sha256').update(lastUpdate).digest('hex'));
+      expect(repaired.type === 'committed' && Buffer.from(decodeUpdate(repaired.update)).equals(stored.rows[0].payload)).toBe(true);
+      // Even without reconnecting, a duplicate must return the same repair and
+      // original receipt, without inserting another paragraph or sequence.
+      last.socket.send(JSON.stringify({ type: 'update', batchId, update: encodeUpdate(lastUpdate) }));
+      expect(await last.next()).toEqual(repaired);
+      expect(await last.next()).toEqual({ type: 'ack', batchId, sequence: 2 });
+      const loaded = await loadPage(pool, pageId, DEV_ACCOUNT_ID);
+      expect(loaded.sequence).toBe(2);
+      expect(loaded.doc.getXmlFragment('body').length).toBe(1);
+      expect((loaded.doc.getXmlFragment('body').get(0) as Y.XmlElement).getAttribute('id')).toBeTruthy();
+      loaded.doc.destroy();
+      last.socket.send(JSON.stringify({ type: 'update', batchId, update: encodeUpdate(firstUpdate) }));
+      expect(await last.next()).toMatchObject({ type: 'error', code: 'BATCH_CONFLICT', retryable: false });
+    } finally {
+      first.socket.close(); last.socket.close(); base.destroy(); a.destroy(); b.destroy();
+    }
+  });
+  it('survives termination of its own idle PostgreSQL connection and reconnects for subsequent commits', async () => {
+    const taggedUrl = new URL(databaseUrl!);
+    const applicationName = `kikit-idle-error-test-${randomUUID()}`;
+    taggedUrl.searchParams.set('application_name', applicationName);
+    app = await createServer({ databaseUrl: taggedUrl.toString() });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const first = await connect();
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const idle = await pool.query<{ pid: number }>("SELECT pid FROM pg_stat_activity WHERE application_name=$1 AND state='idle'", [applicationName]);
+      expect(idle.rows).toHaveLength(1);
+      expect((await pool.query('SELECT pg_terminate_backend($1) AS terminated', [idle.rows[0].pid])).rows[0].terminated).toBe(true);
+      await vi.waitFor(() => expect(warning).toHaveBeenCalledWith('PostgreSQL idle connection failed; the pool will reconnect on demand.'));
+      const retry = await connect();
+      try {
+        const batchId = randomUUID();
+        retry.socket.send(JSON.stringify({ type: 'update', batchId, update: encodeUpdate(edit('After reconnect ')) }));
+        expect(await retry.next()).toEqual({ type: 'ack', batchId, sequence: 1 });
+        const loaded = await loadPage(pool, pageId, DEV_ACCOUNT_ID);
+        expect(loaded.doc.getXmlFragment('body').toString()).toContain('After reconnect ');
+        loaded.doc.destroy();
+      } finally { retry.socket.close(); }
+    } finally { warning.mockRestore(); first.socket.close(); }
+  });
   it('resolves an acknowledgement lost after COMMIT through the original receipt on reconnect', async () => {
     app = await createServer({ databaseUrl }); await app.listen({ host: '127.0.0.1', port: 0 });
     const first = await connect(); const batchId = randomUUID(); const update = edit('Durable ');

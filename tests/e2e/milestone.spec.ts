@@ -110,6 +110,61 @@ test('offline edits survive an offline reload, then reconnect using the durable 
   await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(text);
 });
 
+test('concurrent offline deletions recover an editable body and drain subsequent journal batches', async ({ browser, request }) => {
+  const a = await openPage(browser);
+  const bodyA = a.page.getByRole('textbox', { name: 'Page body', exact: true });
+  await bodyA.fill('First paragraph');
+  await bodyA.press('ControlOrMeta+End');
+  await bodyA.press('Enter');
+  await a.page.keyboard.insertText('Second paragraph');
+  await saved(a.page);
+  const b = await openPage(browser);
+  const bodyB = b.page.getByRole('textbox', { name: 'Page body', exact: true });
+  const originalIds = await bodyA.locator('p').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')));
+  await Promise.all([a.context.setOffline(true), b.context.setOffline(true)]);
+  for (const [body, index] of [[bodyA, 0], [bodyB, 1]] as const) {
+    // Use the mounted Tiptap command to delete exactly one whole block. Native
+    // selections can merge blocks and thus delete a different CRDT identity.
+    await body.evaluate((element, index) => {
+      const editor = (element as HTMLElement & { editor: {
+        state: { doc: { child(index: number): { nodeSize: number } } };
+        commands: { deleteRange(range: { from: number; to: number }): boolean };
+      } }).editor;
+      const from = index === 0 ? 0 : editor.state.doc.child(0).nodeSize;
+      editor.commands.deleteRange({ from, to: from + editor.state.doc.child(index).nodeSize });
+    }, index);
+    await expect(body.locator('p')).toHaveCount(1);
+  }
+  for (const page of [a.page, b.page]) await expect(page.getByTestId('local-status')).toHaveText('Saved on this device');
+  // Commit A first. B's reconnect merges that committed deletion with its own
+  // pending deletion before the server receives B's immutable journal record.
+  await a.context.setOffline(false);
+  await saved(a.page);
+  await b.context.setOffline(false);
+  for (const page of [a.page, b.page]) await saved(page);
+  for (const body of [bodyA, bodyB]) {
+    await expect(body.locator('p')).toHaveCount(1);
+    await expect(body).toHaveText('');
+  }
+  const repairedId = await bodyA.locator('p').getAttribute('data-id');
+  expect(repairedId).toBeTruthy();
+  expect(originalIds).not.toContain(repairedId);
+  await expect(bodyB.locator('p')).toHaveAttribute('data-id', repairedId!);
+  await append(b.page, 'After concurrent deletion');
+  await saved(b.page);
+  await expect(bodyA).toHaveText('After concurrent deletion');
+  await append(a.page, ' and another edit');
+  for (const page of [a.page, b.page]) await saved(page);
+  await Promise.all([a.page.reload(), b.page.reload()]);
+  for (const page of [a.page, b.page]) {
+    await saved(page);
+    const body = page.getByRole('textbox', { name: 'Page body', exact: true });
+    await expect(body).toHaveText('After concurrent deletion and another edit');
+    await expect(body.locator('p')).toHaveAttribute('data-id', repairedId!);
+  }
+  await expect.poll(async () => (await (await request.get('http://127.0.0.1:3002/api/test/metrics')).json()).pendingCount).toBe(0);
+});
+
 test('same batch is idempotent and reuse with different bytes is rejected', async () => {
   const wire = await rawConnection();
   try {

@@ -8,7 +8,13 @@ export class AccessError extends Error {}
 export class ReceiptConflict extends Error {}
 export class CompatibilityError extends Error {}
 export function createPool(connectionString: string): pg.Pool {
-  return new pg.Pool({ connectionString, max: 8, connectionTimeoutMillis: 5000, statement_timeout: 5000, lock_timeout: 2000, idle_in_transaction_session_timeout: 10000, options: "-c transaction_timeout=15000" });
+  const pool = new pg.Pool({ connectionString, max: 8, connectionTimeoutMillis: 5000, statement_timeout: 5000, lock_timeout: 2000, idle_in_transaction_session_timeout: 10000, options: "-c transaction_timeout=15000" });
+  // pg evicts the failed idle client. Handle its error event so subsequent work
+  // can open a replacement connection without terminating the service.
+  pool.on('error', () => {
+    console.warn('PostgreSQL idle connection failed; the pool will reconnect on demand.');
+  });
+  return pool;
 }
 export async function migrateDatabase(pool: pg.Pool): Promise<void> {
   const client = await pool.connect();
@@ -73,29 +79,35 @@ export async function loadPage(pool: pg.Pool, pageId: string, accountId: string)
     throw error;
   } finally { client.release(); }
 }
-export async function commitUpdate(pool: pg.Pool, pageId: string, accountId: string, batchId: string, update: Uint8Array, beforeCommit?: () => Promise<void>, validate?: () => void, afterCommit?: () => void): Promise<{ sequence: number; duplicate: boolean }> {
+export async function commitUpdate(pool: pg.Pool, pageId: string, accountId: string, batchId: string, update: Uint8Array, beforeCommit?: () => Promise<void>, validate?: () => Uint8Array | void, afterCommit?: () => void): Promise<{ sequence: number; duplicate: boolean; committedUpdate?: Uint8Array }> {
   const client = await pool.connect();
   let discard = false;
   const hash = createHash('sha256').update(update).digest('hex');
   try {
     await client.query('BEGIN');
     const page = await authorize(client, pageId, accountId, true);
-    const receipt = await client.query<{ payload_hash: string; sequence: string }>('SELECT payload_hash, sequence FROM receipts WHERE page_id=$1 AND batch_id=$2', [pageId, batchId]);
+    const receipt = await client.query<{ payload_hash: string; sequence: string; payload: Buffer }>(`
+      SELECT r.payload_hash, r.sequence, u.payload FROM receipts r
+      JOIN document_updates u ON u.page_id=r.page_id AND u.sequence=r.sequence
+      WHERE r.page_id=$1 AND r.batch_id=$2`, [pageId, batchId]);
     if (receipt.rows[0]) {
       if (receipt.rows[0].payload_hash !== hash) throw new ReceiptConflict('Batch identity already belongs to different bytes');
       await client.query('COMMIT');
-      return { sequence: Number(receipt.rows[0].sequence), duplicate: true };
+      const committedUpdate = receipt.rows[0].payload;
+      return { sequence: Number(receipt.rows[0].sequence), duplicate: true, ...(committedUpdate.equals(update) ? {} : { committedUpdate }) };
     }
-    validate?.();
+    // The receipt hashes immutable client bytes; validation may add a CRDT
+    // repair that must be committed atomically with those bytes.
+    const committedUpdate = validate?.() ?? update;
     const sequence = Number(page.sequence) + 1;
-    await client.query('INSERT INTO document_updates(page_id,sequence,payload) VALUES($1,$2,$3)', [pageId, sequence, Buffer.from(update)]);
+    await client.query('INSERT INTO document_updates(page_id,sequence,payload) VALUES($1,$2,$3)', [pageId, sequence, Buffer.from(committedUpdate)]);
     await client.query('INSERT INTO receipts(page_id,batch_id,payload_hash,sequence) VALUES($1,$2,$3,$4)', [pageId, batchId, hash, sequence]);
     await client.query('UPDATE pages SET sequence=$2 WHERE id=$1', [pageId, sequence]);
     await beforeCommit?.();
     // No client timeout races this transaction. Unknown COMMIT results remain unacknowledged.
     await client.query('COMMIT');
     afterCommit?.();
-    return { sequence, duplicate: false };
+    return { sequence, duplicate: false, ...(committedUpdate === update ? {} : { committedUpdate }) };
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch { discard = true; }
     throw error;

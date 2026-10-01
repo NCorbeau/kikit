@@ -19,10 +19,22 @@ export function createSeed(): Uint8Array {
   return update;
 }
 export function validateDocument(doc: Y.Doc): void {
+  validateSchema(doc, false);
+}
+
+/** Repair only a valid CRDT merge that deleted all body blocks. */
+export function normalizeEmptyBody(doc: Y.Doc): void {
+  validateSchema(doc, true);
+  const body = doc.getXmlFragment(BODY_FRAGMENT);
+  if (body.length === 0) body.insert(0, [paragraph('', randomUUID())]);
+  validateDocument(doc);
+}
+
+function validateSchema(doc: Y.Doc, allowEmptyBody: boolean): void {
   if ([...doc.share.keys()].some(key => key !== TITLE_FRAGMENT && key !== BODY_FRAGMENT)) throw new Error('Unsupported document fragment');
   const title = doc.getXmlFragment(TITLE_FRAGMENT);
   const body = doc.getXmlFragment(BODY_FRAGMENT);
-  if (title.length !== 1 || body.length < 1) throw new Error('Document requires a title paragraph and body blocks');
+  if (title.length !== 1 || (!allowEmptyBody && body.length < 1)) throw new Error('Document requires a title paragraph and body blocks');
   for (const [fragment, isTitle] of [[title, true], [body, false]] as const) {
     for (const block of fragment.toArray()) {
       if (!(block instanceof Y.XmlElement) || !['paragraph', ...(isTitle ? [] : ['heading'])].includes(block.nodeName)) throw new Error('Unsupported block');

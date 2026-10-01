@@ -4,11 +4,11 @@ import type { WebSocket } from 'ws';
 import * as Y from 'yjs';
 import {
   clientMessageSchema, decodeUpdate, encodeUpdate, PROTOCOL_VERSION, DOCUMENT_SCHEMA_VERSION,
-  DEV_ACCOUNT_ID, DEV_PAGE_ID, MAX_UPDATE_BYTES, MAX_WIRE_BYTES, type ServerMessage,
+  DEV_ACCOUNT_ID, DEV_PAGE_ID, BODY_FRAGMENT, MAX_UPDATE_BYTES, MAX_WIRE_BYTES, type ServerMessage,
 } from '@kikit/contracts';
 import { DEFAULT_DATABASE_URL, isLoopback, requireDevelopmentFixture } from './config.js';
 import { AccessError, CompatibilityError, ReceiptConflict, createPool, loadPage, commitUpdate } from './persistence.js';
-import { validateDocument } from './document.js';
+import { normalizeEmptyBody } from './document.js';
 import { OverloadError, PageQueues, ShutdownError } from './queue.js';
 
 class InvalidDocument extends Error {}
@@ -135,7 +135,14 @@ export async function createServer(options: { databaseUrl?: string; origin?: str
           try {
             Y.applyUpdate(candidate, Y.encodeStateAsUpdate(room.doc)); Y.applyUpdate(candidate, update);
             if (candidate.store.pendingStructs || candidate.store.pendingDs) throw new DependencyMissing();
-            validateDocument(candidate);
+            const needsRepair = candidate.getXmlFragment(BODY_FRAGMENT).length === 0;
+            const beforeRepair = Y.encodeStateVector(candidate);
+            normalizeEmptyBody(candidate);
+            // Preserve the submitted update and merge in server-authored repair
+            // structs. The client batch hash still covers only its original bytes.
+            if (needsRepair) {
+              return Y.mergeUpdates([update, Y.encodeStateAsUpdate(candidate, beforeRepair)]);
+            }
           } catch (error) { if (error instanceof DependencyMissing) throw error; throw new InvalidDocument(); }
           finally { candidate.destroy(); }
         }, () => {
@@ -152,10 +159,14 @@ export async function createServer(options: { databaseUrl?: string; origin?: str
         // For a new update, apply and schedule peer output only after COMMIT succeeds.
         if (!result.duplicate) {
           try {
-            Y.applyUpdate(room.doc, update); room.sequence = result.sequence;
-            for (const peer of room.sockets) if (peer !== socket) send(peer, { type: 'committed', update: message.update, sequence: result.sequence });
+            const committedUpdate = result.committedUpdate ?? update;
+            Y.applyUpdate(room.doc, committedUpdate); room.sequence = result.sequence;
+            for (const peer of room.sockets) if (peer !== socket) send(peer, { type: 'committed', update: encodeUpdate(committedUpdate), sequence: result.sequence });
           } catch { invalidate(activePageId); throw new Error('Committed room application failed'); }
         }
+        // The author also needs a server repair before its receipt is acknowledged.
+        // A duplicate retry gets the originally committed repair, never a new one.
+        if (result.committedUpdate) send(socket, { type: 'committed', update: encodeUpdate(result.committedUpdate), sequence: result.sequence });
         if (dropNextAck) { dropNextAck = false; socket.close(1012, 'Injected lost acknowledgement'); return; }
         send(socket, { type: 'ack', batchId: message.batchId, sequence: result.sequence });
       }).catch(error => fail(socket, error, message.batchId));
