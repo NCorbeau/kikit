@@ -11,11 +11,15 @@ Kikit aims for a calm, polished editing experience: open a page, write naturally
 - Accounts and persistent personal notes, private by default.
 - A page title, paragraphs, and headings with natural keyboard, selection, paste, split, merge, and undo behavior.
 - Immediate local editing and recovery of locally saved changes after reload.
-- Synchronization across devices and between authorized collaborators.
+- Synchronization across devices and between multiple signed-in collaborators.
+- Owner-managed invite links and QR codes; recipients sign in and join shared pages as editors.
+- Simple owner/editor permissions, member removal, participant indicators, and colored cursors.
 - Clear feedback distinguishing local persistence from durable server storage.
 - A focused, accessible interface with careful typography and restrained controls.
 
 Nested workspaces, databases, attachments, comments, AI features, and native applications are outside the first release.
+
+Sharing requires login in v1. Disabling an invite link stops new joins; removing a member revokes their page access. Existing members keep access when a link is disabled. Guest access may be considered later.
 
 ## Architecture
 
@@ -53,7 +57,7 @@ The server's live queues are in memory. Recovery depends on the browser journal 
 
 1. Prove a tiny editor and sync flow across two independent browser sessions.
 2. Deliver a polished local editor with persistence, cached offline reopening, and recovery.
-3. Integrate login, page permissions, cross-device synchronization, and restrained presence.
+3. Integrate real login, owner/editor membership, link/QR invitations, cross-device synchronization, and restrained presence. Verify collaboration between distinct accounts.
 4. Verify failure scenarios, compatibility, resource limits, backup restoration, and deployment.
 5. Publish a usable demo, setup instructions, architecture decisions, and measured results.
 
