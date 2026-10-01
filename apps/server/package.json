@@ -1,0 +1,6 @@
+{
+  "name": "@kikit/server", "private": true, "type": "module",
+  "scripts": { "dev": "NODE_ENV=development KIKIT_DEV_FIXTURE=1 tsx watch src/main.ts", "start": "tsx src/main.ts", "db:migrate": "NODE_ENV=development KIKIT_DEV_FIXTURE=1 tsx src/migrate.ts", "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": { "@kikit/contracts": "workspace:*", "fastify": "5.12.5", "@fastify/websocket": "^11.2.0", "pg": "^8.16.0", "p-queue": "9.3.3", "yjs": "13.6.33", "ws": "^8.18.0" },
+  "devDependencies": { "@types/pg": "^8.15.0", "@types/ws": "^8.18.0" }
+}
