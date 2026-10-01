@@ -1,0 +1,36 @@
+{
+  "name": "kikit",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @kikit/server db:migrate",
+    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.json",
+    "build": "pnpm -r build",
+    "test": "vitest run",
+    "test:e2e": "tsx scripts/prepare-test-db.ts && playwright test",
+    "test:integration": "tsx scripts/prepare-test-db.ts && KIKIT_TEST_DATABASE_URL=postgres://kikit:kikit_local_only@127.0.0.1:54329/kikit_e2e vitest run apps/server/src/server.integration.test.ts apps/server/src/migrations.integration.test.ts",
+    "db:generate": "pnpm --filter @kikit/server db:generate"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4",
+    "fake-indexeddb": "^6.2.0",
+    "@kikit/contracts": "workspace:*",
+    "pg": "^8.16.0",
+    "@types/pg": "^8.15.0",
+    "ws": "^8.18.0",
+    "@types/ws": "^8.18.0",
+    "yjs": "13.6.33"
+  }
+}

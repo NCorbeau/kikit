@@ -4,13 +4,15 @@
 
 Kikit is a small, polished block editor for persistent personal notes. It is also a learning project: its editing, local persistence, authorization, synchronization, and recovery should be inspectable end to end.
 
-The repository is currently documentation only. Do not claim that the application, tests, dependencies, or deployment exist. Implement the next agreed slice rather than interpreting a planning discussion as authorization to build the entire system.
+The first local development milestone now implements the editor, IndexedDB journal, custom synchronization, PostgreSQL persistence, and automated checks. Accounts and production deployment are not implemented. Implement the next agreed slice rather than interpreting a planning discussion as authorization to build the entire system.
 
 ## Product scope
 
 The first release includes accounts, private notes, page titles, paragraphs, headings, local persistence, cross-device sync, and authorized collaboration. Natural typing, selection, paste, composition input, split/merge, local undo, accessibility, and visual quality are core requirements.
 
 Keep controls restrained and writing central. Use a compact set of typography, spacing, color, border, focus, and motion tokens. Give loading, failure, and recovery states the same care as the happy path.
+
+Keep UI copy functional and concise; avoid decorative slogans. Support light and dark themes with a system default and a remembered user choice. Keep application roots focused on composition, with session lifetimes and browser interactions in focused hooks. Extract responsibilities to improve reading, not merely to reduce line counts or introduce wrappers.
 
 Do not expand into nested workspaces, drag reordering, databases, attachments, comments, AI features, native apps, or a plugin system without an explicit scope decision.
 
@@ -19,15 +21,18 @@ Do not expand into nested workspaces, drag reordering, databases, attachments, c
 - React + TypeScript + Vite for the web application.
 - Tiptap/ProseMirror for editor mechanics and its Yjs binding for shared content.
 - One Y.Doc per page; editor-compatible body content and a separate simple title fragment. Stable block IDs require explicit split/paste handling.
-- IndexedDB for locally persisted document updates and pending outbound batches.
+- IndexedDB through `idb` for locally persisted document updates and pending outbound batches.
 - Node + TypeScript + Fastify for HTTP, authentication, and custom WebSocket sync.
 - Better Auth inside the backend, with authentication records and sessions in PostgreSQL.
 - PostgreSQL for page metadata, access grants, binary document updates, snapshots, and durable receipts.
+- Drizzle ORM for typed database queries and Drizzle Kit for generated, reviewed SQL migration files. Keep transaction and row-lock boundaries explicit; development fixture seeding stays separate from schema migrations.
 - `p-queue` for in-process per-page sequencing.
 - Railway for one active application instance and PostgreSQL in the same environment and region, using private database networking.
 - A pnpm workspace when code is introduced. Initial applications may live in `apps/web` and `apps/server`; extract shared document/protocol contracts only where genuinely shared.
 
 Start as a modular monolith. Keep editor, document-session, local-store, sync-client, pages/access, sync-server, and persistence responsibilities separate. Avoid speculative interfaces, layers, or independently deployed services.
+
+Prefer established, focused libraries for generic infrastructure when they reduce maintenance and make the code easier to understand. Keep product-specific durability, authorization, transport, and recovery decisions explicit. Add a dependency for a concrete simplification in the current implementation, with verification that its behavior preserves the relevant invariants.
 
 ## Editing and synchronization invariants
 

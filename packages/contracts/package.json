@@ -1,0 +1,16 @@
+{
+  "name": "@kikit/contracts",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "yjs": "13.6.33",
+    "zod": "^3.25.0"
+  }
+}

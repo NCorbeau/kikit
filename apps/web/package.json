@@ -1,0 +1,35 @@
+{
+  "name": "@kikit/web",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@kikit/contracts": "workspace:*",
+    "@tiptap/core": "3.31.4",
+    "@tiptap/extension-collaboration": "3.31.4",
+    "@tiptap/extension-document": "3.31.4",
+    "@tiptap/extension-heading": "3.31.4",
+    "@tiptap/extension-paragraph": "3.31.4",
+    "@tiptap/extension-placeholder": "3.31.4",
+    "@tiptap/extension-text": "3.31.4",
+    "@tiptap/extension-unique-id": "3.31.4",
+    "@tiptap/pm": "3.31.4",
+    "@tiptap/react": "3.31.4",
+    "@tiptap/y-tiptap": "3.0.9",
+    "idb": "8.0.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "yjs": "13.6.33"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "vite": "8.3.2"
+  }
+}
