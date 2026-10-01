@@ -10,7 +10,7 @@ Verified on 2026-10-01 using macOS/Apple Silicon, Node 24.21.0, pnpm 12.5.1, Doc
 | `pnpm test` | 36 passed; 13 PostgreSQL integration tests intentionally skipped without opt-in |
 | `pnpm test:integration` | All 13 real PostgreSQL tests passed (7 persistence/WebSocket, 6 migrations) |
 | `pnpm test:e2e` | All 15 Chromium scenarios passed |
-| `pnpm build` | Passed; Vite reports a large editor chunk (728.48 kB before gzip) |
+| `pnpm build` | Passed; Vite reports a large editor chunk (728.51 kB before gzip) |
 
 The browser scenarios cover:
 
@@ -36,11 +36,15 @@ The migration workflow was exercised with `pnpm db:generate` (no outstanding sch
 
 The `idb` refactor passed the full unit and browser suites. Added regressions read and acknowledge an existing native IndexedDB cache without changing its schema, identities, or bytes, and verify that an acknowledgement transaction abort retains pending work even after its write request succeeds. An independent review of the local-store changes found no actionable introduced defects.
 
+For the borderless editor focus refinement, reran the three existing keyboard/paste/selection, collaborative undo, and theme scenarios against the actual backend and PostgreSQL; all passed. A separate preview harness checked Tab navigation, visible control focus rings, no editor outline or focus-induced layout shift, the gutter cue in forced colors, and no horizontal overflow at 320px. Build passed.
+
 ## Manual inspection
 
 Inspected the running application in regular Chrome using its screenshot and accessibility tree: the writing surface, typography, spacing, restrained controls, distinct device/server status, and labelled title/body/formatting controls were visible. The frontend implementer also inspected desktop and 390px screenshots and checked for horizontal overflow. Persistent Playwright tests provide the keyboard/paste/undo evidence above.
 
 For the simplified UI, manually exercised title editing and Tab focus, native clipboard paste, text selection and heading shortcut, undo, light/dark switching, and the save details in regular Chrome against an isolated preview database. Reviewed fresh light/dark desktop and dark offline mobile screenshots; the preview harness also checked the open status menu at 320px and the editor at 390px without horizontal overflow. The UI/recovery/theme changes received a separate read-only review with no actionable introduced defects.
+
+Visually inspected refreshed light/dark desktop and dark offline mobile screenshots with the body focused. The writing surface stays borderless; a small gutter cue and caret indicate focus. These screenshots use sample notes in a disposable preview database. The focus/navigation checks for this refinement were automated, not a new manual keyboard or screen-reader audit.
 
 No full screen-reader audit, native operating-system IME session, Safari/Firefox suite, mobile keyboard/device check or user usability study was performed. Chromium's composition-event test does not replace those checks.
 

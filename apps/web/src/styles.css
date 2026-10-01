@@ -195,14 +195,21 @@ button:focus-visible, summary:focus-visible, a:focus-visible {
   outline: none;
 }
 .page-title { margin-bottom: 18px; }
+.page-title, .page-body { position: relative; }
+.page-title:has(.tiptap:focus-visible)::before,
+.page-body:has(.tiptap:focus-visible)::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: -10px;
+  width: 2px;
+  height: 16px;
+  border-left: 2px solid var(--focus);
+  pointer-events: none;
+}
 .tiptap {
   outline: none;
   overflow-wrap: anywhere;
-}
-.tiptap:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 7px;
-  border-radius: 2px;
 }
 .tiptap[contenteditable="false"] { cursor: default; }
 .title-editor {

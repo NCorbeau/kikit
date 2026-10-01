@@ -105,7 +105,7 @@ export function PageEditor({ doc, editable }: { doc: Doc; editable: boolean }) {
     <>
       <div className="page-title"><EditorContent editor={title} /></div>
       <FormattingToolbar editor={body} editable={editable} selection={selection} />
-      <EditorContent editor={body} />
+      <EditorContent editor={body} className="page-body" />
     </>
   );
 }
