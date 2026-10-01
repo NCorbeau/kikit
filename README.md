@@ -1,8 +1,8 @@
-# Lilted
+# Kikit
 
 A small block editor for personal notes, built to make writing feel immediate and synchronization understandable end to end.
 
-Lilted aims for a calm, polished editing experience: open a page, write naturally, and keep working when the connection drops. The project combines a deliberately narrow product scope with explicit persistence, synchronization, and recovery behavior.
+Kikit aims for a calm, polished editing experience: open a page, write naturally, and keep working when the connection drops. The project combines a deliberately narrow product scope with explicit persistence, synchronization, and recovery behavior.
 
 **Status: planning.** This repository currently contains the project introduction and agent instructions. The application, tests, and deployment have not been implemented yet.
 
@@ -63,6 +63,6 @@ The early proof must exercise lost acknowledgements, duplicate delivery, reloads
 
 Read [AGENTS.md](AGENTS.md) for scope, architectural invariants, and the development workflow. Executable setup commands will be added with the first working implementation.
 
-Keep evidence honest: document supported behavior and limitations, and report performance with test conditions. Cached offline access is limited to previously opened notes; browser storage can be cleared or evicted. Before relying on Lilted for real notes, implement and test the selected backup and recovery policy.
+Keep evidence honest: document supported behavior and limitations, and report performance with test conditions. Cached offline access is limited to previously opened notes; browser storage can be cleared or evicted. Before relying on Kikit for real notes, implement and test the selected backup and recovery policy.
 
 Login method, hosting plan and budget, recovery targets, and licensing remain to be decided. Durable background processing is deferred until a concrete task requires it; `pg-boss` and Graphile Worker are candidates.
