@@ -1,8 +1,8 @@
-# Working on Lilted
+# Working on Kikit
 
 ## Purpose and current state
 
-Lilted is a small, polished block editor for persistent personal notes. It is also a learning project: its editing, local persistence, authorization, synchronization, and recovery should be inspectable end to end.
+Kikit is a small, polished block editor for persistent personal notes. It is also a learning project: its editing, local persistence, authorization, synchronization, and recovery should be inspectable end to end.
 
 The repository is currently documentation only. Do not claim that the application, tests, dependencies, or deployment exist. Implement the next agreed slice rather than interpreting a planning discussion as authorization to build the entire system.
 
