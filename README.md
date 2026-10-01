@@ -42,4 +42,6 @@ The system starts with one web client, one active application server, and Postgr
 
 Setup instructions and test commands will accompany the first working implementation. See [AGENTS.md](AGENTS.md) for contributor and coding-agent guidance.
 
-A license has not been selected yet.
+## License
+
+[MIT](LICENSE) © 2026 Maciej Głownia.
