@@ -6,6 +6,10 @@ Kikit is a small, local-first notes app built around a simple block editor. Its 
 
 **Status: first local development milestone.** The editor, browser journal, custom WebSocket synchronization, PostgreSQL persistence, and failure/recovery tests work locally. Real accounts, invitations, production authorization, hosting, and backups are subsequent work. This is not ready for valuable or private notes.
 
+![Typing in two independent Kikit windows, with edits synchronizing in both directions](docs/demos/live-sync.gif)
+
+Two independent browser sessions editing the same page through the local backend and PostgreSQL, recorded at normal speed. [MP4 version](docs/demos/live-sync.mp4).
+
 ## Run locally
 
 Requirements: Node.js 24+, pnpm 12.5.1, Docker with Compose, and a current Chromium-based browser. No cloud services or paid infrastructure are needed.
