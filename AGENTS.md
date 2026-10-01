@@ -98,4 +98,6 @@ Version technical contracts and implementation decisions in the repository as th
 
 Discuss changes that alter product scope, recurring cost, data guarantees, major dependencies, or substantial implementation effort. Ordinary reversible details can be selected during implementation. Provisioning, publishing, or other external actions still require authorization in the current conversation; this file itself grants none.
 
-Open decisions include the initial login method, exact hosting plan/region and monthly budget, backup/retention and recovery targets, and license. Do not silently settle them or add paid infrastructure.
+Kikit is licensed under MIT; preserve the root LICENSE and copyright notices. Use the MIT SPDX identifier in package metadata when packages are introduced. Keep third-party license and attribution obligations intact.
+
+Open decisions include the initial login method, exact hosting plan/region and monthly budget, and backup/retention and recovery targets. Do not silently settle them or add paid infrastructure.
