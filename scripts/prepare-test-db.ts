@@ -6,4 +6,6 @@ try {
   const existing = await pool.query("SELECT 1 FROM pg_database WHERE datname='kikit_e2e'");
   if (!existing.rowCount) await pool.query('CREATE DATABASE kikit_e2e');
   console.log('Local kikit_e2e database ready.');
-} finally { await pool.end(); }
+} finally {
+  await pool.end();
+}

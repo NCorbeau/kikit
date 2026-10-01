@@ -7,3 +7,12 @@ export function requireDevelopmentFixture(): void {
 export function isLoopback(address: string | undefined): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
+
+export function requireLoopbackOrigin(origin: string): void {
+  const parsed = new URL(origin);
+  const loopbackHost = ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname);
+  const httpProtocol = ['http:', 'https:'].includes(parsed.protocol);
+  if (!httpProtocol || !loopbackHost || parsed.origin !== origin) {
+    throw new Error('The development fixture requires an exact loopback browser origin');
+  }
+}

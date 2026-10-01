@@ -52,9 +52,13 @@ Page access is checked separately through PostgreSQL grants on handshake and eac
 | `apps/web/src/session/local-store.ts` | Account/page IndexedDB update history and ordered durable outbound journal |
 | `apps/web/src/session/index.ts` | Hydration, local persistence, pending batches, truthful state and recovery |
 | `apps/web/src/session/sync-client.ts` | Fixture handshake, WebSocket transport, ordered messages and reconnection |
-| `apps/server/src/app.ts` | Access integration, rooms, protocol validation and committed propagation |
+| `apps/server/src/app.ts` | Server wiring, development routes, connection admission and shutdown |
+| `apps/server/src/sync-connection.ts` | Socket lifetime, handshake and incoming message validation |
+| `apps/server/src/sync-room.ts` | Page rooms, serialized commit/application, propagation and recovery |
+| `apps/server/src/sync-protocol.ts` | Bounded outgoing messages and protocol error mapping |
 | `apps/server/src/queue.ts` | Bounded per-page sequencing and shutdown admission |
-| `apps/server/src/persistence.ts` | SQL migration, server seed, page locks, transactions and receipts |
+| `apps/server/src/persistence.ts` | Page access locks, document loading, transactions and receipts |
+| `apps/server/src/migrations.ts` | Transactional SQL migration and one-time server seed |
 | `packages/contracts` | Versioned wire messages, constants and binary encoding |
 
 1. The editor changes its Y.Doc immediately.
@@ -64,7 +68,7 @@ Page access is checked separately through PostgreSQL grants on handshake and eac
 5. The server applies committed bytes to its room, schedules peer propagation, then acknowledges the original batch.
 6. The client marks that journal record acknowledged, retaining its document bytes. Lost acknowledgements retry the same identity and bytes.
 
-Reconnect uses a full committed Yjs state handshake. It does not clear pending batches. A reused batch identity with different bytes is rejected. Any uncertain database commit or room-application failure invalidates the room; connected clients reload committed state and resolve pending outcomes through receipts. No separate REST content-save path exists.
+Reconnect uses a full committed Yjs state handshake. It does not clear pending batches. A reused batch identity with different bytes is rejected. If concurrent deletions remove every body block, the server commits one empty paragraph with the edit and returns that same repair on retries. Any uncertain database commit or room-application failure invalidates the room; connected clients reload committed state and resolve pending outcomes through receipts. No separate REST content-save path exists.
 
 See [the concrete protocol and persistence contract](docs/milestone-contract.md) and [verification evidence](docs/verification.md). [AGENTS.md](AGENTS.md) records project-wide invariants and scope.
 

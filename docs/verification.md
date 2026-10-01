@@ -7,10 +7,10 @@ Verified on 2026-10-01 using macOS/Apple Silicon, Node 24.21.0, pnpm 12.5.1, Doc
 | Command | Result |
 | --- | --- |
 | `pnpm typecheck` | Passed for shared contracts, server, web, test harness and root configuration |
-| `pnpm test` | 32 passed; 5 PostgreSQL integration tests intentionally skipped without opt-in |
-| `pnpm test:integration` | All 5 real PostgreSQL/WebSocket tests passed |
-| `pnpm test:e2e` | All 11 Chromium scenarios passed |
-| `pnpm build` | Passed; Vite reports a large editor chunk (724.91 kB before gzip) |
+| `pnpm test` | 33 passed; 7 PostgreSQL integration tests intentionally skipped without opt-in |
+| `pnpm test:integration` | All 7 real PostgreSQL/WebSocket tests passed |
+| `pnpm test:e2e` | All 12 Chromium scenarios passed |
+| `pnpm build` | Passed; Vite reports a large editor chunk (725.23 kB before gzip) |
 
 The browser scenarios cover:
 
@@ -25,6 +25,7 @@ The browser scenarios cover:
 9. Unknown page, unsupported protocol and foreign WebSocket Origin denial.
 10. Keyboard split/merge, isolated merge undo, heading shortcut, paste ID regeneration, selection, title-to-toolbar Tab order and title Enter focus.
 11. Chromium composition events followed by a Unicode commit, synchronized without the intermediate composition text remaining.
+12. Offline clients deleting different remaining paragraphs, convergence to one server-repaired empty paragraph, continued editing, and stable block identity after reload.
 
 Vitest checks additionally cover atomic IndexedDB aborts, namespace isolation, insertion-ordered replay, unsupported cached versions, unpersisted recovery exports, local acknowledgement persistence failure, stale handshakes, terminal readonly state, bounded queues, failed tasks, orderly shutdown, and production fixture denial. PostgreSQL checks exercise atomic rollback, duplicate receipts, concurrent row locking, cross-account denial, lost acknowledgement and uncertain commit recovery.
 
@@ -41,7 +42,12 @@ An independent durability review identified two concrete races:
 - A lost database COMMIT result left the room stale; a later peer commit could hide the missing update behind an advanced sequence. Persistence failures with uncertain outcomes now invalidate the room and close its sockets. Both PostgreSQL/WebSocket and independent-browser regressions verify reconstruction and stable receipts.
 - An older batch's successful acknowledgement cleared a newer edit's local append failure. Append/load errors and local receipt-write errors are now separate. The regression verifies that the newer edit remains recoverable and its error stays actionable.
 
-No unresolved blocker was reported by that review. This is a local development milestone, not the authenticated-account release gate in AGENTS.md.
+A subsequent branch review identified two further defects:
+
+- Concurrent deletions could merge to an empty body and permanently reject a valid pending batch. The server now adds one empty paragraph to that candidate and commits the repair with the submitted update. Receipts still hash the original client bytes; duplicate delivery returns the same repair. Unit, PostgreSQL, and independent-browser regressions cover this path.
+- An idle PostgreSQL connection error could escape as an unhandled event and terminate the backend. The pool now handles that event with a static warning. A real PostgreSQL test terminates a dedicated idle connection and verifies that the server accepts and commits another edit.
+
+These findings are resolved. This is a local development milestone, not the authenticated-account release gate in AGENTS.md.
 
 ## Limits of the evidence
 

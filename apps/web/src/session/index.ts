@@ -1,9 +1,20 @@
 import * as Y from 'yjs';
 import {
-  DEV_ACCOUNT_ID, DEV_PAGE_ID, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION,
-  encodeUpdate, decodeUpdate, type ClientMessage, type ServerMessage,
+  DEV_ACCOUNT_ID,
+  DEV_PAGE_ID,
+  DOCUMENT_SCHEMA_VERSION,
+  PROTOCOL_VERSION,
+  decodeUpdate,
+  encodeUpdate,
+  type ClientMessage,
+  type ServerMessage,
 } from '@kikit/contracts';
-import { CacheCompatibilityError, LocalStore, type DocumentStore, type StoredUpdate } from './local-store';
+import {
+  CacheCompatibilityError,
+  LocalStore,
+  type DocumentStore,
+  type StoredUpdate,
+} from './local-store';
 import { SyncClient, type Connection } from './sync-client';
 
 export interface SessionSnapshot {
@@ -15,6 +26,7 @@ export interface SessionSnapshot {
   serverSaved: boolean;
   error: string | null;
 }
+
 export interface DocumentSession {
   doc: Y.Doc;
   start(): Promise<void>;
@@ -24,68 +36,82 @@ export interface DocumentSession {
   exportRecovery(): string;
   destroy(): void;
 }
+
 interface Transport {
-  start(): void; retry(): void; reconnect(): void; stopWithError(): void;
-  send(message: ClientMessage): boolean; destroy(): void;
+  start(): void;
+  retry(): void;
+  reconnect(): void;
+  stopWithError(): void;
+  send(message: ClientMessage): boolean;
+  destroy(): void;
 }
+
 interface TransportCallbacks {
   connection(state: Connection): void;
   message(message: ServerMessage): Promise<void>;
   error(message: string, terminal: boolean): void;
 }
+
 /** Constructor dependencies keep failure tests independent of browser transport. */
 export interface SessionDependencies {
   store?: DocumentStore;
   transport?: (callbacks: TransportCallbacks) => Transport;
 }
-const REMOTE = Symbol('remote');
-type WaitingWrite = { record: StoredUpdate; initialized: boolean };
+
+const REMOTE_UPDATE_ORIGIN = Symbol('remote');
+const RECEIPT_TIMEOUT_MS = 10_000;
+type QueuedWrite = { record: StoredUpdate; initialized: boolean };
+type CommittedStateMessage = Extract<ServerMessage, { type: 'sync' | 'committed' }>;
+type AcknowledgementMessage = Extract<ServerMessage, { type: 'ack' }>;
 
 export function createDocumentSession(dependencies: SessionDependencies = {}): DocumentSession {
-  if (import.meta.env.PROD) throw new Error('The development identity fixture is disabled in production builds.');
+  if (import.meta.env.PROD) {
+    throw new Error('The development identity fixture is disabled in production builds.');
+  }
   return new Session(dependencies);
 }
 
 class Session implements DocumentSession {
   readonly doc = new Y.Doc();
-  private store: DocumentStore;
-  private transport: Transport;
-  private listeners = new Set<() => void>();
-  private snapshot: SessionSnapshot = { ready: false, editable: false, connection: 'connecting', local: 'saved', pending: 0, serverSaved: false, error: null };
-  private pending = new Map<string, StoredUpdate>();
-  private writes: WaitingWrite[] = [];
-  private flushing?: Promise<void>;
+  private readonly store: DocumentStore;
+  private readonly transport: Transport;
+  private readonly listeners = new Set<() => void>();
+  private snapshot: SessionSnapshot = {
+    ready: false,
+    editable: false,
+    connection: 'connecting',
+    local: 'saved',
+    pending: 0,
+    serverSaved: false,
+    error: null,
+  };
+
+  // A batch moves from queuedWrites to pendingBatches only after its local commit.
+  private readonly pendingBatches = new Map<string, StoredUpdate>();
+  private readonly queuedWrites: QueuedWrite[] = [];
+  private flushPromise?: Promise<void>;
+  private hydrationPromise?: Promise<void>;
   private started = false;
   private active = false;
-  private loading?: Promise<void>;
   private destroyed = false;
-  private loaded = false;
-  private synced = false;
-  private terminal = false;
-  private locked = false;
+  private cacheLoaded = false;
+  private synchronized = false;
+  private terminalError = false;
+  private editingLocked = false;
   private connectionEpoch = 0;
   private incompatibleCache: StoredUpdate[] = [];
-  private inFlight?: string;
-  private ackTimer?: ReturnType<typeof setTimeout>;
-  private localError: string | null = null;
+  private inFlightBatchId?: string;
+  private receiptTimer?: ReturnType<typeof setTimeout>;
+
+  // Keep these failures separate: an older receipt must not clear a newer failed append.
+  private appendError: string | null = null;
   private receiptError: string | null = null;
   private remoteError: string | null = null;
-  private leave = (event: BeforeUnloadEvent) => {
-    if (this.writes.length) { event.preventDefault(); event.returnValue = ''; }
-  };
 
   constructor(dependencies: SessionDependencies) {
     this.store = dependencies.store ?? new LocalStore(DEV_ACCOUNT_ID, DEV_PAGE_ID);
     const callbacks: TransportCallbacks = {
-      connection: state => {
-        if (state !== 'online') {
-          this.connectionEpoch++;
-          this.synced = false;
-          this.inFlight = undefined;
-          clearTimeout(this.ackTimer);
-        }
-        this.publish({ connection: state });
-      },
+      connection: state => this.connectionChanged(state),
       message: message => this.receive(message),
       error: (message, terminal) => this.failRemote(message, terminal),
     };
@@ -93,22 +119,51 @@ class Session implements DocumentSession {
   }
 
   getSnapshot = (): SessionSnapshot => this.snapshot;
+
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
 
+  private warnBeforeLeaving = (event: BeforeUnloadEvent): void => {
+    if (this.queuedWrites.length === 0) return;
+    event.preventDefault();
+    event.returnValue = '';
+  };
+
+  private connectionChanged(state: Connection): void {
+    if (state !== 'online') {
+      this.connectionEpoch++;
+      this.synchronized = false;
+      this.clearInFlightBatch();
+    }
+    this.publish({ connection: state });
+  }
+
   private publish(changes: Partial<SessionSnapshot> = {}): void {
     if (this.destroyed) return;
+    const unpersistedBatches = this.queuedWrites.filter(write => write.record.pending).length;
     const next: SessionSnapshot = {
-      ...this.snapshot, ...changes,
-      pending: this.pending.size + this.writes.filter(write => write.record.pending).length,
-      local: (this.localError || this.receiptError) ? 'error' : this.writes.length ? 'saving' : 'saved',
-      error: this.localError ?? this.receiptError ?? this.remoteError,
+      ...this.snapshot,
+      ...changes,
+      pending: this.pendingBatches.size + unpersistedBatches,
+      local: this.appendError || this.receiptError
+        ? 'error'
+        : this.queuedWrites.length > 0 ? 'saving' : 'saved',
+      error: this.appendError ?? this.receiptError ?? this.remoteError,
     };
-    next.editable = next.ready && !this.locked;
-    next.serverSaved = this.synced && next.connection === 'online' && next.local === 'saved' && next.pending === 0 && !next.error;
-    if (Object.keys(next).every(key => next[key as keyof SessionSnapshot] === this.snapshot[key as keyof SessionSnapshot])) return;
+    next.editable = next.ready && !this.editingLocked;
+    next.serverSaved = this.synchronized
+      && next.connection === 'online'
+      && next.local === 'saved'
+      && next.pending === 0
+      && !next.error;
+
+    const unchanged = Object.keys(next).every(key => {
+      const field = key as keyof SessionSnapshot;
+      return next[field] === this.snapshot[field];
+    });
+    if (unchanged) return;
     this.snapshot = next;
     for (const listener of this.listeners) listener();
   }
@@ -116,21 +171,23 @@ class Session implements DocumentSession {
   async start(): Promise<void> {
     if (this.started || this.destroyed) return;
     this.started = true;
-    window.addEventListener('beforeunload', this.leave);
-    await this.load();
+    window.addEventListener('beforeunload', this.warnBeforeLeaving);
+    await this.loadCache();
     this.activate();
   }
 
   private activate(): void {
-    if (this.destroyed || !this.loaded || this.active) return;
+    if (this.destroyed || !this.cacheLoaded || this.active) return;
     this.active = true;
-    this.doc.on('update', this.changed);
+    this.doc.on('update', this.localDocumentChanged);
     this.transport.start();
   }
 
-  private load(): Promise<void> {
-    this.loading ??= this.hydrate().finally(() => { this.loading = undefined; });
-    return this.loading;
+  private loadCache(): Promise<void> {
+    this.hydrationPromise ??= this.hydrate().finally(() => {
+      this.hydrationPromise = undefined;
+    });
+    return this.hydrationPromise;
   }
 
   private async hydrate(): Promise<void> {
@@ -138,164 +195,232 @@ class Session implements DocumentSession {
       const cache = await this.store.load();
       if (this.destroyed) return;
       for (const record of cache.updates) {
-        Y.applyUpdate(this.doc, record.update, REMOTE);
-        if (record.pending) this.pending.set(record.id, record);
+        Y.applyUpdate(this.doc, record.update, REMOTE_UPDATE_ORIGIN);
+        if (record.pending) this.pendingBatches.set(record.id, record);
       }
-      this.loaded = true;
-      this.localError = null;
+      this.cacheLoaded = true;
+      this.appendError = null;
       this.publish({ ready: cache.initialized });
     } catch (error) {
       if (error instanceof CacheCompatibilityError) {
         this.incompatibleCache = error.recovery.updates;
-        this.locked = true;
+        this.editingLocked = true;
       }
-      this.localError = this.describe(error, 'Could not open local storage.');
+      this.appendError = describeError(error, 'Could not open local storage.');
       this.publish({ connection: 'error' });
     }
   }
 
-  private changed = (update: Uint8Array, origin: unknown): void => {
-    if (origin === REMOTE || this.destroyed) return;
-    this.writes.push({ record: { id: crypto.randomUUID(), update: update.slice(), pending: true }, initialized: false });
+  private localDocumentChanged = (update: Uint8Array, origin: unknown): void => {
+    if (origin === REMOTE_UPDATE_ORIGIN || this.destroyed) return;
+    this.queuedWrites.push({
+      record: { id: crypto.randomUUID(), update: update.slice(), pending: true },
+      initialized: false,
+    });
     this.publish();
-    if (!this.localError) void this.flush();
+    if (!this.appendError) void this.flush();
   };
 
   private flush(): Promise<void> {
-    if (this.flushing) return this.flushing;
-    this.flushing = (async () => {
-      while (this.writes.length && !this.destroyed) {
-        const write = this.writes[0];
-        try {
-          await this.store.append(write.record, write.initialized);
-          this.writes.shift();
-          if (write.record.pending) this.pending.set(write.record.id, write.record);
-          this.localError = null;
-          this.publish();
-          this.pump();
-        } catch (error) {
-          if (error instanceof CacheCompatibilityError) { this.locked = true; this.terminal = true; this.transport.stopWithError(); }
-          this.localError = this.describe(error, 'Local save failed. Keep this tab open or export your recovery file.');
-          this.publish();
-          return;
-        }
-      }
-    })().finally(() => { this.flushing = undefined; });
-    return this.flushing;
+    this.flushPromise ??= this.persistQueuedWrites().finally(() => {
+      this.flushPromise = undefined;
+    });
+    return this.flushPromise;
   }
 
-  private pump(): void {
-    if (this.destroyed || !this.synced || this.terminal || this.localError || this.receiptError || this.inFlight) return;
-    const next = this.pending.values().next().value as StoredUpdate | undefined;
+  private async persistQueuedWrites(): Promise<void> {
+    while (this.queuedWrites.length > 0 && !this.destroyed) {
+      const write = this.queuedWrites[0];
+      try {
+        await this.store.append(write.record, write.initialized);
+        this.queuedWrites.shift();
+        if (write.record.pending) this.pendingBatches.set(write.record.id, write.record);
+        this.appendError = null;
+        this.publish();
+        this.sendNextBatch();
+      } catch (error) {
+        this.stopForIncompatibleCache(error);
+        this.appendError = describeError(
+          error,
+          'Local save failed. Keep this tab open or export your recovery file.',
+        );
+        this.publish();
+        return;
+      }
+    }
+  }
+
+  private sendNextBatch(): void {
+    const cannotSend = this.destroyed || !this.synchronized || this.terminalError
+      || this.appendError || this.receiptError || this.inFlightBatchId;
+    if (cannotSend) return;
+    const next = this.pendingBatches.values().next().value as StoredUpdate | undefined;
     if (!next) return;
-    this.inFlight = next.id;
-    if (!this.transport.send({ type: 'update', batchId: next.id, update: encodeUpdate(next.update) })) {
-      this.inFlight = undefined;
+
+    this.inFlightBatchId = next.id;
+    const sent = this.transport.send({
+      type: 'update',
+      batchId: next.id,
+      update: encodeUpdate(next.update),
+    });
+    if (!sent) {
+      this.inFlightBatchId = undefined;
       return;
     }
-    // A missing acknowledgement is an unknown outcome; resend the same identity after reconnect.
-    this.ackTimer = setTimeout(() => this.transport.reconnect(), 10000);
+    // A missing receipt is an unknown outcome. Reconnect and resend the same identity.
+    this.receiptTimer = setTimeout(() => this.transport.reconnect(), RECEIPT_TIMEOUT_MS);
   }
 
   private async receive(message: ServerMessage): Promise<void> {
-    if (this.destroyed || this.terminal) return;
-    if (message.type === 'error') {
-      this.failRemote(message.message, !message.retryable);
-      if (message.retryable) this.transport.reconnect();
-      else this.transport.stopWithError();
-      return;
-    }
-    if (message.type === 'sync' || message.type === 'committed') {
-      const epoch = this.connectionEpoch;
-      if (message.type === 'sync' && (message.protocolVersion !== PROTOCOL_VERSION || message.schemaVersion !== DOCUMENT_SCHEMA_VERSION)) {
-        this.failRemote('This page needs a different version of Kikit. Your local work has been preserved.', true);
-        this.transport.stopWithError();
+    if (this.destroyed || this.terminalError) return;
+    switch (message.type) {
+      case 'error':
+        this.failRemote(message.message, !message.retryable);
+        if (message.retryable) this.transport.reconnect();
+        else this.transport.stopWithError();
         return;
-      }
-      const update = decodeUpdate(message.update);
-      Y.applyUpdate(this.doc, update, REMOTE);
-      this.writes.push({ record: { id: crypto.randomUUID(), update, pending: false }, initialized: true });
-      this.publish({ ready: true });
-      if (!this.localError) await this.flush();
-      if (message.type === 'sync' && epoch === this.connectionEpoch) {
-        this.locked = false;
-        this.synced = true;
-        this.remoteError = null;
-        this.publish({ connection: 'online' });
-        this.pump();
-      }
+      case 'sync':
+      case 'committed':
+        await this.receiveCommittedState(message);
+        return;
+      case 'ack':
+        await this.receiveAcknowledgement(message);
+    }
+  }
+
+  private async receiveCommittedState(message: CommittedStateMessage): Promise<void> {
+    const epoch = this.connectionEpoch;
+    if (message.type === 'sync' && (
+      message.protocolVersion !== PROTOCOL_VERSION
+      || message.schemaVersion !== DOCUMENT_SCHEMA_VERSION
+    )) {
+      this.failRemote('This page needs a different version of Kikit. Your local work has been preserved.', true);
+      this.transport.stopWithError();
       return;
     }
-    // Ignore unsolicited/stale ack identities. Only a receipt for our journal can clear it.
-    if (!this.pending.has(message.batchId)) return;
-    if (this.inFlight === message.batchId) clearTimeout(this.ackTimer);
-    await this.flushing;
+
+    const update = decodeUpdate(message.update);
+    Y.applyUpdate(this.doc, update, REMOTE_UPDATE_ORIGIN);
+    this.queuedWrites.push({
+      record: { id: crypto.randomUUID(), update, pending: false },
+      initialized: true,
+    });
+    this.publish({ ready: true });
+    if (!this.appendError) await this.flush();
+
+    // Persistence may have outlasted the connection that supplied this handshake.
+    if (message.type === 'sync' && epoch === this.connectionEpoch) {
+      this.editingLocked = false;
+      this.synchronized = true;
+      this.remoteError = null;
+      this.publish({ connection: 'online' });
+      this.sendNextBatch();
+    }
+  }
+
+  private async receiveAcknowledgement(message: AcknowledgementMessage): Promise<void> {
+    // Only a receipt for our durable journal can clear a pending batch.
+    if (!this.pendingBatches.has(message.batchId)) return;
+    if (this.inFlightBatchId === message.batchId) clearTimeout(this.receiptTimer);
+    await this.flushPromise;
     try {
       await this.store.acknowledge(message.batchId);
-      this.pending.delete(message.batchId);
-      if (this.inFlight === message.batchId) this.inFlight = undefined;
+      this.pendingBatches.delete(message.batchId);
+      if (this.inFlightBatchId === message.batchId) this.inFlightBatchId = undefined;
       this.receiptError = null;
       this.publish();
-      this.pump();
+      this.sendNextBatch();
     } catch (error) {
-      if (error instanceof CacheCompatibilityError) { this.locked = true; this.terminal = true; this.transport.stopWithError(); }
-      this.receiptError = this.describe(error, 'Could not store the server acknowledgement. Your pending work has been preserved.');
-      this.inFlight = undefined;
+      this.stopForIncompatibleCache(error);
+      this.receiptError = describeError(
+        error,
+        'Could not store the server acknowledgement. Your pending work has been preserved.',
+      );
+      this.inFlightBatchId = undefined;
       this.publish();
     }
+  }
+
+  private stopForIncompatibleCache(error: unknown): void {
+    if (!(error instanceof CacheCompatibilityError)) return;
+    this.editingLocked = true;
+    this.terminalError = true;
+    this.transport.stopWithError();
+  }
+
+  private clearInFlightBatch(): void {
+    this.inFlightBatchId = undefined;
+    clearTimeout(this.receiptTimer);
   }
 
   private failRemote(message: string, terminal: boolean): void {
     this.remoteError = message;
-    this.terminal = terminal;
-    if (terminal) this.locked = true;
-    this.inFlight = undefined;
-    clearTimeout(this.ackTimer);
-    this.synced = false;
+    this.terminalError = terminal;
+    if (terminal) this.editingLocked = true;
+    this.clearInFlightBatch();
+    this.synchronized = false;
     this.publish({ connection: 'error' });
   }
 
   retry(): void {
     if (this.destroyed) return;
-    if (!this.started) { void this.start(); return; }
-    if (!this.loaded) {
-      void this.load().then(() => this.activate());
+    if (!this.started) {
+      void this.start();
       return;
     }
-    this.localError = null;
+    if (!this.cacheLoaded) {
+      void this.loadCache().then(() => this.activate());
+      return;
+    }
+    this.appendError = null;
     this.receiptError = null;
     this.remoteError = null;
-    this.terminal = false;
-    this.synced = false;
-    this.inFlight = undefined;
-    clearTimeout(this.ackTimer);
+    this.terminalError = false;
+    this.synchronized = false;
+    this.clearInFlightBatch();
     this.publish();
     void this.flush().then(() => {
-      if (!this.destroyed && !this.localError) this.transport.retry();
+      if (!this.destroyed && !this.appendError) this.transport.retry();
     });
   }
 
   exportRecovery(): string {
+    const unpersistedBatches = this.queuedWrites
+      .filter(write => write.record.pending)
+      .map(write => write.record);
+    const pendingBatches = [...this.pendingBatches.values(), ...unpersistedBatches];
     return JSON.stringify({
-      format: 'kikit-recovery', formatVersion: 1, schemaVersion: DOCUMENT_SCHEMA_VERSION,
-      accountId: DEV_ACCOUNT_ID, pageId: DEV_PAGE_ID, exportedAt: new Date().toISOString(),
+      format: 'kikit-recovery',
+      formatVersion: 1,
+      schemaVersion: DOCUMENT_SCHEMA_VERSION,
+      accountId: DEV_ACCOUNT_ID,
+      pageId: DEV_PAGE_ID,
+      exportedAt: new Date().toISOString(),
       update: encodeUpdate(Y.encodeStateAsUpdate(this.doc)),
-      cachedUpdates: this.incompatibleCache.map(record => ({ batchId: record.id, update: encodeUpdate(record.update), pending: record.pending })),
-      pending: [...this.pending.values(), ...this.writes.filter(write => write.record.pending).map(write => write.record)]
-        .map(record => ({ batchId: record.id, update: encodeUpdate(record.update) })),
+      cachedUpdates: this.incompatibleCache.map(record => ({
+        batchId: record.id,
+        update: encodeUpdate(record.update),
+        pending: record.pending,
+      })),
+      pending: pendingBatches.map(record => ({
+        batchId: record.id,
+        update: encodeUpdate(record.update),
+      })),
     }, null, 2);
   }
 
   destroy(): void {
     this.destroyed = true;
-    clearTimeout(this.ackTimer);
+    clearTimeout(this.receiptTimer);
     this.transport.destroy();
-    window.removeEventListener('beforeunload', this.leave);
-    this.doc.off('update', this.changed);
+    window.removeEventListener('beforeunload', this.warnBeforeLeaving);
+    this.doc.off('update', this.localDocumentChanged);
     this.doc.destroy();
     this.listeners.clear();
-    void (this.flushing ?? Promise.resolve()).finally(() => this.store.close());
+    void (this.flushPromise ?? Promise.resolve()).finally(() => this.store.close());
   }
+}
 
-  private describe(error: unknown, fallback: string): string { return error instanceof Error ? error.message : fallback; }
+function describeError(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
