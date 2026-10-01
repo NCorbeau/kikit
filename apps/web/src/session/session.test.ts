@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { IDBFactory } from 'fake-indexeddb';
+import 'fake-indexeddb/auto';
 import { DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, decodeUpdate, encodeUpdate, type ClientMessage, type ServerMessage } from '@kikit/contracts';
 import { createDocumentSession, type DocumentSession, type SessionDependencies } from './index';
 import { CacheCompatibilityError, LocalStore, type DocumentStore, type StoredDocument, type StoredUpdate } from './local-store';

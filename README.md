@@ -64,7 +64,7 @@ Page access is checked separately through PostgreSQL grants on handshake and eac
 | Module | Responsibility |
 | --- | --- |
 | `apps/web/src/editor` | Tiptap/ProseMirror schema, Yjs bindings, keyboard behavior, block IDs |
-| `apps/web/src/session/local-store.ts` | Account/page IndexedDB update history and ordered durable outbound journal |
+| `apps/web/src/session/local-store.ts` | Typed `idb` transactions for account/page history and the durable outbound journal |
 | `apps/web/src/session/index.ts` | Hydration, local persistence, pending batches, truthful state and recovery |
 | `apps/web/src/session/sync-client.ts` | Fixture handshake, WebSocket transport, ordered messages and reconnection |
 | `apps/server/src/app.ts` | Server wiring, development routes, connection admission and shutdown |

@@ -38,6 +38,8 @@ The backend entry point wires routes, connection admission, and shutdown. `sync-
 
 IndexedDB `updates` uses an auto-increment primary key for insertion order and a unique `id` index for immutable batch identities. Update bytes, the pending flag, and initialization metadata commit together with strict durability requested. Acknowledgements change only the pending flag. Multiple tabs can replay the same pending identity safely; fresh browser contexts communicate exclusively through the backend. No IndexedDB cache deletion is automatic.
 
+`idb` supplies typed promise wrappers for IndexedDB requests and transactions. The store waits for `tx.done` before reporting a committed read/write. Only IndexedDB work is awaited inside an active transaction; semantic failures abort it and settle its completion promise before returning the error. The wrapper does not change the existing database name, version, stores, or records.
+
 A local append failure and a failed local acknowledgement write are tracked separately. Receipt success for an older batch cannot clear a newer append failure. Unpersisted edits are retained in memory, included in recovery export, and protected by a before-unload warning; no reload guarantee is made until their IndexedDB transaction completes.
 
 The server validates candidate CRDT state before storing a new batch, retaining the room unchanged until COMMIT. Missing causal dependencies produce a retryable error. Receipt lookup precedes candidate validation for duplicate identities. SHA-256 covers the exact submitted update bytes. A conflict never changes a receipt or creates another update.

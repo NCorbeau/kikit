@@ -1,4 +1,5 @@
 import { DOCUMENT_SCHEMA_VERSION } from '@kikit/contracts';
+import { wrap, type DBSchema, type IDBPDatabase, type IDBPTransaction } from 'idb';
 
 export interface StoredUpdate {
   id: string;
@@ -25,7 +26,12 @@ type Metadata = {
   formatVersion: number;
   initialized: boolean;
 };
-type OrderedUpdate = StoredUpdate & { ordinal: number };
+type OrderedUpdate = StoredUpdate & { ordinal?: number };
+interface LocalDatabase extends DBSchema {
+  updates: { key: number; value: OrderedUpdate; indexes: { id: string } };
+  metadata: { key: 'document'; value: Metadata };
+}
+type WriteTransaction = IDBPTransaction<LocalDatabase, ['updates', 'metadata'], 'readwrite'>;
 
 /** An incompatible cache stays untouched and can still be exported without applying it. */
 export class CacheCompatibilityError extends Error {
@@ -46,7 +52,7 @@ function sameBytes(first: Uint8Array, second: Uint8Array): boolean {
 /** Atomic records keep update bytes and pending IDs together; the generated ordinal
  * gives causal insertion order even when independent tabs write the same journal. */
 export class LocalStore implements DocumentStore {
-  private opening?: Promise<IDBDatabase>;
+  private opening?: Promise<IDBPDatabase<LocalDatabase>>;
   private closed = false;
 
   constructor(
@@ -55,7 +61,7 @@ export class LocalStore implements DocumentStore {
     private readonly factory: IDBFactory = indexedDB,
   ) {}
 
-  private database(): Promise<IDBDatabase> {
+  private database(): Promise<IDBPDatabase<LocalDatabase>> {
     if (this.closed) return Promise.reject(new Error('Local store is closed.'));
     this.opening ??= this.openDatabase().catch(error => {
       this.opening = undefined;
@@ -64,7 +70,7 @@ export class LocalStore implements DocumentStore {
     return this.opening;
   }
 
-  private openDatabase(): Promise<IDBDatabase> {
+  private openDatabase(): Promise<IDBPDatabase<LocalDatabase>> {
     return new Promise((resolve, reject) => {
       let blocked = false;
       const namespace = JSON.stringify([this.accountId, this.pageId]);
@@ -88,7 +94,7 @@ export class LocalStore implements DocumentStore {
           database.close();
           this.opening = undefined;
         };
-        resolve(database);
+        resolve(wrap(database) as IDBPDatabase<LocalDatabase>);
       };
       request.onerror = () => reject(request.error ?? new Error('Could not open local storage.'));
       request.onblocked = () => {
@@ -100,101 +106,83 @@ export class LocalStore implements DocumentStore {
 
   async load(): Promise<StoredDocument> {
     const database = await this.database();
-    return new Promise((resolve, reject) => {
-      const transaction = database.transaction(['metadata', 'updates'], 'readonly');
-      const metadataRequest = transaction.objectStore('metadata').get('document');
-      const updatesRequest = transaction.objectStore('updates').getAll();
-      transaction.oncomplete = () => {
-        const metadata = metadataRequest.result as Metadata | undefined;
-        // getAll follows the numeric primary key, not the random batch UUID.
-        const updates = (updatesRequest.result as OrderedUpdate[])
-          .map(({ ordinal: _ordinal, ...record }) => record);
-        const cache = { initialized: metadata?.initialized ?? false, updates };
-        if (metadata && !isCompatible(metadata)) {
-          reject(new CacheCompatibilityError(cache));
-          return;
-        }
-        resolve(cache);
-      };
-      transaction.onabort = () => reject(transaction.error ?? new Error('Could not read local storage.'));
-      transaction.onerror = () => { /* onabort reports the transaction outcome */ };
-    });
+    const transaction = database.transaction(['metadata', 'updates'], 'readonly');
+    const [metadata, records] = await Promise.all([
+      transaction.objectStore('metadata').get('document'),
+      transaction.objectStore('updates').getAll(),
+      transaction.done,
+    ]);
+    // getAll follows the numeric primary key, not the random batch UUID.
+    const updates = records.map(({ ordinal: _ordinal, ...record }) => record);
+    const cache = { initialized: metadata?.initialized ?? false, updates };
+    if (metadata && !isCompatible(metadata)) throw new CacheCompatibilityError(cache);
+    return cache;
   }
 
   async append(record: StoredUpdate, initialized = false): Promise<void> {
     await this.writeTransaction(
       'Local save failed. Keep this tab open and export your recovery file.',
-      (transaction, metadata, abort) => {
+      async (transaction, metadata) => {
         const updates = transaction.objectStore('updates');
-        const existingRequest = updates.index('id').get(record.id);
-        existingRequest.onsuccess = () => {
-          const saved = existingRequest.result as OrderedUpdate | undefined;
-          // An uncertain transaction retry must keep the same payload and must
-          // never turn an acknowledged record pending again.
-          if (saved && !sameBytes(saved.update, record.update)) {
-            abort(new Error(
-              'A local batch identity was reused with different content. Export your recovery file.',
-            ));
-            return;
-          }
-          if (!saved) updates.add(record);
-          transaction.objectStore('metadata').put({
-            key: 'document',
-            schemaVersion: DOCUMENT_SCHEMA_VERSION,
-            formatVersion: LOCAL_FORMAT_VERSION,
-            initialized: initialized || metadata?.initialized || false,
-          } satisfies Metadata);
-        };
+        const saved = await updates.index('id').get(record.id);
+        // An uncertain transaction retry must keep the same payload and must
+        // never turn an acknowledged record pending again.
+        if (saved && !sameBytes(saved.update, record.update)) {
+          throw new Error(
+            'A local batch identity was reused with different content. Export your recovery file.',
+          );
+        }
+        if (!saved) await updates.add(record);
+        await transaction.objectStore('metadata').put({
+          key: 'document',
+          schemaVersion: DOCUMENT_SCHEMA_VERSION,
+          formatVersion: LOCAL_FORMAT_VERSION,
+          initialized: initialized || metadata?.initialized || false,
+        });
       },
     );
   }
 
   async acknowledge(id: string): Promise<void> {
-    await this.writeTransaction('Could not save the server acknowledgement locally.', transaction => {
+    await this.writeTransaction('Could not save the server acknowledgement locally.', async transaction => {
       const updates = transaction.objectStore('updates');
-      const request = updates.index('id').get(id);
-      request.onsuccess = () => {
-        const record = request.result as OrderedUpdate | undefined;
-        if (record) updates.put({ ...record, pending: false });
-      };
+      const record = await updates.index('id').get(id);
+      if (record) await updates.put({ ...record, pending: false });
     });
   }
 
   // Each write validates metadata within the same strict-durability transaction.
-  // Success resolves only at oncomplete, after all requests have committed.
+  // Await only IndexedDB operations here; success requires transaction.done.
   private async writeTransaction(
     failureMessage: string,
     enqueueRequests: (
-      transaction: IDBTransaction,
+      transaction: WriteTransaction,
       metadata: Metadata | undefined,
-      abort: (error: Error) => void,
-    ) => void,
+    ) => Promise<void>,
   ): Promise<void> {
     const database = await this.database();
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(['updates', 'metadata'], 'readwrite', {
-        durability: 'strict',
-      });
-      let failure: Error | undefined;
-      const abort = (error: Error): void => {
-        failure = error;
-        transaction.abort();
-      };
-      const metadataRequest = transaction.objectStore('metadata').get('document');
-      metadataRequest.onsuccess = () => {
-        const metadata = metadataRequest.result as Metadata | undefined;
-        if (metadata && !isCompatible(metadata)) {
-          abort(new CacheCompatibilityError({ initialized: false, updates: [] }));
-          return;
-        }
-        enqueueRequests(transaction, metadata, abort);
-      };
-      transaction.oncomplete = () => resolve();
-      transaction.onabort = () => reject(
-        failure ?? transaction.error ?? new Error(failureMessage),
-      );
-      transaction.onerror = () => { /* request success does not mean committed */ };
+    const transaction = database.transaction(['updates', 'metadata'], 'readwrite', {
+      durability: 'strict',
     });
+    // A request can fail before we await done, so attach its rejection handler now.
+    const settled = transaction.done.catch(() => {});
+    try {
+      const metadata = await transaction.objectStore('metadata').get('document');
+      if (metadata && !isCompatible(metadata)) {
+        throw new CacheCompatibilityError({ initialized: false, updates: [] });
+      }
+      await enqueueRequests(transaction, metadata);
+      await transaction.done;
+    } catch (error) {
+      // Semantic and synchronous request failures must also roll back any writes.
+      try { transaction.abort(); } catch { /* already completed or aborted */ }
+      await settled;
+      if (error instanceof DOMException
+        && ['AbortError', 'InvalidStateError', 'TransactionInactiveError'].includes(error.name)) {
+        throw transaction.error ?? new Error(failureMessage, { cause: error });
+      }
+      throw error ?? new Error(failureMessage);
+    }
   }
 
   close(): void {

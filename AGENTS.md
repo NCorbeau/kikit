@@ -19,7 +19,7 @@ Do not expand into nested workspaces, drag reordering, databases, attachments, c
 - React + TypeScript + Vite for the web application.
 - Tiptap/ProseMirror for editor mechanics and its Yjs binding for shared content.
 - One Y.Doc per page; editor-compatible body content and a separate simple title fragment. Stable block IDs require explicit split/paste handling.
-- IndexedDB for locally persisted document updates and pending outbound batches.
+- IndexedDB through `idb` for locally persisted document updates and pending outbound batches.
 - Node + TypeScript + Fastify for HTTP, authentication, and custom WebSocket sync.
 - Better Auth inside the backend, with authentication records and sessions in PostgreSQL.
 - PostgreSQL for page metadata, access grants, binary document updates, snapshots, and durable receipts.
@@ -29,6 +29,8 @@ Do not expand into nested workspaces, drag reordering, databases, attachments, c
 - A pnpm workspace when code is introduced. Initial applications may live in `apps/web` and `apps/server`; extract shared document/protocol contracts only where genuinely shared.
 
 Start as a modular monolith. Keep editor, document-session, local-store, sync-client, pages/access, sync-server, and persistence responsibilities separate. Avoid speculative interfaces, layers, or independently deployed services.
+
+Prefer established, focused libraries for generic infrastructure when they reduce maintenance and make the code easier to understand. Keep product-specific durability, authorization, transport, and recovery decisions explicit. Add a dependency for a concrete simplification in the current implementation, with verification that its behavior preserves the relevant invariants.
 
 ## Editing and synchronization invariants
 
