@@ -45,16 +45,16 @@ export function SaveStatus({ snapshot, onRetry }: {
   const summaryLabel = snapshot.local === 'saved' && snapshot.serverSaved
     ? 'Saved to server'
     : localLabel;
-  const dotClass = snapshot.connection === 'offline' ? 'is-offline'
-    : failed ? 'is-error'
+  const dotClass = failed ? 'is-error'
+    : snapshot.connection === 'offline' ? 'is-offline'
     : snapshot.serverSaved ? 'is-saved' : 'is-saving';
 
   return (
     <details className="save-details">
       <summary className={`save-summary ${failed ? 'has-error' : ''}`}>
-        <span className={`status-dot ${dotClass}`} />
+        <span className={`status-dot ${dotClass}`} aria-hidden="true" />
         <span data-testid="save-status" role="status" aria-live="polite">
-          {snapshot.ready ? summaryLabel : 'Opening your page…'}
+          {snapshot.ready ? summaryLabel : 'Opening page…'}
         </span>
         <span data-testid="connection-status" className="connection-label">
           {CONNECTION_LABELS[snapshot.connection]}
@@ -62,10 +62,10 @@ export function SaveStatus({ snapshot, onRetry }: {
         <span className="disclosure-chevron" aria-hidden="true">⌄</span>
       </summary>
       <div className="save-popover">
-        <p className="popover-title">Your words, accounted for.</p>
+        <p className="popover-title">Save status</p>
         <div className="save-line">
           <span>Device</span>
-          <strong>{snapshot.ready ? localLabel : 'Loading…'}</strong>
+          <strong data-testid="local-status">{snapshot.ready ? localLabel : 'Loading…'}</strong>
         </div>
         <div className="save-line">
           <span>Server</span>

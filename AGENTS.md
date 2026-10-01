@@ -12,6 +12,8 @@ The first release includes accounts, private notes, page titles, paragraphs, hea
 
 Keep controls restrained and writing central. Use a compact set of typography, spacing, color, border, focus, and motion tokens. Give loading, failure, and recovery states the same care as the happy path.
 
+Keep UI copy functional and concise; avoid decorative slogans. Support light and dark themes with a system default and a remembered user choice. Keep application roots focused on composition, with session lifetimes and browser interactions in focused hooks. Extract responsibilities to improve reading, not merely to reduce line counts or introduce wrappers.
+
 Do not expand into nested workspaces, drag reordering, databases, attachments, comments, AI features, native apps, or a plugin system without an explicit scope decision.
 
 ## Selected architecture

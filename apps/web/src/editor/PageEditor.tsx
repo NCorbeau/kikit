@@ -30,7 +30,7 @@ export function PageEditor({ doc, editable }: { doc: Doc; editable: boolean }) {
         // pasted blocks should mint new identities.
         filterTransaction: transaction => !isChangeOrigin(transaction),
       }),
-      Placeholder.configure({ placeholder: 'Make a little room for your thoughts…' }),
+      Placeholder.configure({ placeholder: 'Write something…' }),
     ],
     editorProps: {
       attributes: {
@@ -98,20 +98,14 @@ export function PageEditor({ doc, editable }: { doc: Doc; editable: boolean }) {
       heading: [1, 2, 3].find(level => editor?.isActive('heading', { level })) ?? 0,
       undo: editor?.can().undo() ?? false,
       redo: editor?.can().redo() ?? false,
-      words: editor?.state.doc.textContent.trim().split(/\s+/).filter(Boolean).length ?? 0,
     }),
   });
 
-  const wordCount = selection?.words ?? 0;
   return (
     <>
       <div className="page-title"><EditorContent editor={title} /></div>
       <FormattingToolbar editor={body} editable={editable} selection={selection} />
       <EditorContent editor={body} />
-      <footer className="page-footer">
-        <span>{wordCount} {wordCount === 1 ? 'word' : 'words'}</span>
-        <span>Room to think. Space to write.</span>
-      </footer>
     </>
   );
 }

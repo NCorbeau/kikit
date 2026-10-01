@@ -42,6 +42,7 @@ Commit the SQL file and generated `meta/` files together. Add a new migration fo
 
 - A collaborative page title, paragraphs, and headings at levels 1–3.
 - Normal typing, selection, Enter/Backspace, paste, local collaborative undo/redo, heading shortcuts, labelled controls, visible keyboard focus, and a responsive writing surface.
+- A compact writing UI with light/dark themes. Appearance follows the system until you choose a mode using the header toggle; your choice is remembered locally.
 - Stable block IDs retained for existing blocks and regenerated for split/pasted blocks.
 - One Y.Doc per page, bound directly to Tiptap. React does not own another editable copy.
 - Atomic IndexedDB storage of each local binary update and its stable outbound batch ID before transmission.
@@ -63,6 +64,10 @@ Page access is checked separately through PostgreSQL grants on handshake and eac
 
 | Module | Responsibility |
 | --- | --- |
+| `apps/web/src/App.tsx` and `components/DocumentPage.tsx` | Session/page composition and restrained loading, offline, and recovery UI |
+| `apps/web/src/session/useDocumentSession.ts` | Stable React session ownership, subscription, and cleanup |
+| `apps/web/src/session/useRecoveryDownload.ts` | Recovery file download and actionable download errors |
+| `apps/web/src/theme.ts` and `theme.css` | System/user appearance preference and shared light/dark color tokens |
 | `apps/web/src/editor` | Tiptap/ProseMirror schema, Yjs bindings, keyboard behavior, block IDs |
 | `apps/web/src/session/local-store.ts` | Typed `idb` transactions for account/page history and the durable outbound journal |
 | `apps/web/src/session/index.ts` | Hydration, local persistence, pending batches, truthful state and recovery |

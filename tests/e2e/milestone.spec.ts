@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import WebSocket from 'ws';
-import { DEV_PAGE_ID } from '@kikit/contracts';
+import * as Y from 'yjs';
+import { DEV_ACCOUNT_ID, DEV_PAGE_ID, DOCUMENT_SCHEMA_VERSION, decodeUpdate } from '@kikit/contracts';
 import { migrateDatabase } from '../../apps/server/src/persistence';
 import { seedDevelopmentPage } from '../../apps/server/src/development-seed';
 import {
@@ -46,6 +48,96 @@ test('two independent browser contexts edit concurrently and reload committed co
   await peer.page.reload();
   await expectServerSaved(peer.page);
   await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(tokenA);
+});
+
+test('theme follows the system until chosen, persists after reload, and preserves editor undo', async ({ browser }) => {
+  const { page } = await openPage(browser, { colorScheme: 'dark', viewport: { width: 390, height: 844 } });
+  const html = page.locator('html');
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(html).toHaveAttribute('data-theme', 'light');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  const text = ` theme-${randomUUID().slice(0, 8)}`;
+  await appendToBody(page, text);
+  await expectServerSaved(page);
+  await page.getByRole('button', { name: 'Switch to light mode', exact: true }).click();
+  await expect(html).toHaveAttribute('data-theme', 'light');
+  const body = page.getByRole('textbox', { name: 'Page body', exact: true });
+  await expect(body).toContainText(text);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(body).not.toContainText(text);
+  await expectServerSaved(page);
+  await page.reload();
+  await expect(html).toHaveAttribute('data-theme', 'light');
+  await expectServerSaved(page);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('unavailable theme preference storage does not prevent editing or switching appearance', async ({ browser }) => {
+  const context = await browser.newContext({ colorScheme: 'dark' });
+  contexts.push(context);
+  await context.addInitScript(() => {
+    const getItem = Storage.prototype.getItem;
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.getItem = function(key) {
+      if (key === 'kikit-theme') throw new DOMException('Storage unavailable', 'SecurityError');
+      return getItem.call(this, key);
+    };
+    Storage.prototype.setItem = function(key, value) {
+      if (key === 'kikit-theme') throw new DOMException('Storage unavailable', 'SecurityError');
+      setItem.call(this, key, value);
+    };
+  });
+  const page = await context.newPage();
+  await page.goto('/');
+  await expectServerSaved(page);
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('button', { name: 'Switch to light mode', exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  const text = ` storage-denied-${randomUUID().slice(0, 8)}`;
+  await appendToBody(page, text);
+  await expectServerSaved(page);
+  await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(text);
+});
+
+test('recovery download retains offline batch identities after export failure and reload', async ({ browser }) => {
+  const { page, context } = await openPage(browser);
+  await expect(page.locator('html')).toHaveAttribute('data-offline-ready', 'true');
+  await context.setOffline(true);
+  const text = ` recovery-${randomUUID().slice(0, 8)}`;
+  await appendToBody(page, text);
+  await expect(page.getByTestId('local-status')).toHaveText('Saved on this device');
+  const downloadRecovery = async () => {
+    const downloading = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download recovery file', exact: true }).click();
+    const download = await downloading;
+    expect(download.suggestedFilename()).toMatch(/^kikit-recovery-\d{4}-\d{2}-\d{2}\.json$/);
+    return JSON.parse(await readFile((await download.path())!, 'utf8'));
+  };
+  const original = await downloadRecovery();
+  expect(original).toMatchObject({
+    format: 'kikit-recovery', formatVersion: 1, schemaVersion: DOCUMENT_SCHEMA_VERSION,
+    accountId: DEV_ACCOUNT_ID, pageId: DEV_PAGE_ID,
+  });
+  expect(original.pending.length).toBeGreaterThan(0);
+  const recovered = new Y.Doc();
+  try {
+    Y.applyUpdate(recovered, decodeUpdate(original.update));
+    expect(recovered.getXmlFragment('body').toString()).toContain(text);
+  } finally {
+    recovered.destroy();
+  }
+  await page.evaluate(() => { URL.createObjectURL = () => { throw new Error('Simulated download failure'); }; });
+  await page.getByRole('button', { name: 'Download recovery file', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('The recovery file could not be created');
+  await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(text);
+  await page.reload();
+  await expect(page.getByTestId('local-status')).toHaveText('Saved on this device');
+  const retried = await downloadRecovery();
+  expect(retried.pending).toEqual(original.pending);
+  await context.setOffline(false);
+  await expectServerSaved(page);
 });
 
 test('offline edits survive an offline reload, then reconnect using the durable journal', async ({ browser }) => {

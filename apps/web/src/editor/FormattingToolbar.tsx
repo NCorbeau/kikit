@@ -6,7 +6,6 @@ export interface FormattingSelection {
   heading: number;
   undo: boolean;
   redo: boolean;
-  words: number;
 }
 
 export function FormattingToolbar({ editor, editable, selection }: {

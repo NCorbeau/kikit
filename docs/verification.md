@@ -9,8 +9,8 @@ Verified on 2026-10-01 using macOS/Apple Silicon, Node 24.21.0, pnpm 12.5.1, Doc
 | `pnpm typecheck` | Passed for shared contracts, server, web, test harness and root configuration |
 | `pnpm test` | 36 passed; 13 PostgreSQL integration tests intentionally skipped without opt-in |
 | `pnpm test:integration` | All 13 real PostgreSQL tests passed (7 persistence/WebSocket, 6 migrations) |
-| `pnpm test:e2e` | All 12 Chromium scenarios passed |
-| `pnpm build` | Passed; Vite reports a large editor chunk (728.17 kB before gzip) |
+| `pnpm test:e2e` | All 15 Chromium scenarios passed |
+| `pnpm build` | Passed; Vite reports a large editor chunk (728.48 kB before gzip) |
 
 The browser scenarios cover:
 
@@ -26,6 +26,9 @@ The browser scenarios cover:
 10. Keyboard split/merge, isolated merge undo, heading shortcut, paste ID regeneration, selection, title-to-toolbar Tab order and title Enter focus.
 11. Chromium composition events followed by a Unicode commit, synchronized without the intermediate composition text remaining.
 12. Offline clients deleting different remaining paragraphs, convergence to one server-repaired empty paragraph, continued editing, and stable block identity after reload.
+13. System theme changes, manual preference retention after reload, and editor undo continuity across theme changes.
+14. Denied theme preference storage still permitting appearance changes and committed note edits.
+15. Offline recovery downloads preserving binary content and batch identities after a failed download and actual offline reload.
 
 Vitest checks additionally cover atomic IndexedDB aborts, namespace isolation, insertion-ordered replay, unsupported cached versions, unpersisted recovery exports, local acknowledgement persistence failure, stale handshakes, terminal readonly state, bounded queues, failed tasks, orderly shutdown, and production fixture denial. PostgreSQL checks exercise atomic rollback, duplicate receipts, concurrent row locking, cross-account denial, lost acknowledgement and uncertain commit recovery. The Drizzle refactor passes these same checks with Buffer-preserving query mappings. Six migration checks cover concurrent/repeated runs, explicit idempotent seeding, adoption of the old schema with stored notes/updates/receipts intact, subsequent-file application, failed DDL rollback, changed/missing history rejection, and newer-schema denial. These checks use temporary schemas and leave development notes untouched. The development seed also has a production-denial unit regression.
 
@@ -36,6 +39,8 @@ The `idb` refactor passed the full unit and browser suites. Added regressions re
 ## Manual inspection
 
 Inspected the running application in regular Chrome using its screenshot and accessibility tree: the writing surface, typography, spacing, restrained controls, distinct device/server status, and labelled title/body/formatting controls were visible. The frontend implementer also inspected desktop and 390px screenshots and checked for horizontal overflow. Persistent Playwright tests provide the keyboard/paste/undo evidence above.
+
+For the simplified UI, manually exercised title editing and Tab focus, native clipboard paste, text selection and heading shortcut, undo, light/dark switching, and the save details in regular Chrome against an isolated preview database. Reviewed fresh light/dark desktop and dark offline mobile screenshots; the preview harness also checked the open status menu at 320px and the editor at 390px without horizontal overflow. The UI/recovery/theme changes received a separate read-only review with no actionable introduced defects.
 
 No full screen-reader audit, native operating-system IME session, Safari/Firefox suite, mobile keyboard/device check or user usability study was performed. Chromium's composition-event test does not replace those checks.
 

@@ -1,4 +1,4 @@
-import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, type Browser, type BrowserContext, type BrowserContextOptions, type Page } from '@playwright/test';
 import pg from 'pg';
 import WebSocket from 'ws';
 import * as Y from 'yjs';
@@ -16,8 +16,8 @@ export async function startServer() {
   await server.listen({ host: '127.0.0.1', port: 3002 });
 }
 
-export async function openPage(browser: Browser) {
-  const context = await browser.newContext();
+export async function openPage(browser: Browser, options: BrowserContextOptions = {}) {
+  const context = await browser.newContext(options);
   contexts.push(context);
   const page = await context.newPage();
   await page.goto('/');
