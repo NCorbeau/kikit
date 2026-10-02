@@ -1,6 +1,6 @@
 # Milestone 1 verification
 
-The dated milestone record below remains historical. The account slice's current checks are recorded in the 2026-10-02 addendum at the end of this file.
+The dated records below are historical checkpoints. Later 2026-10-02 addenda distinguish local shared-page proof, recorded hosted private-account checks, and the merged readability refactor. Their conditions and remaining gates are part of the evidence.
 
 Verified on 2026-10-01 using macOS/Apple Silicon, Node 24.21.0, pnpm 12.5.1, Docker PostgreSQL 17.9, and Playwright 1.63.0's Chromium 153. All browser tests use the actual Fastify backend and PostgreSQL, fresh browser contexts, and a separate local test database. This is correctness evidence for small fixture documents, not a performance/capacity benchmark.
 
@@ -216,3 +216,29 @@ Adding awareness exposed an empty-body reconnect regression: a cursor-only Prose
 Editor assertions inspect ProseMirror document text rather than decoration-bearing DOM text, preserving exact content/convergence checks when cursor labels are present. Account, sharing and presence projects use fresh serial workers. No authentication request is intercepted.
 
 The web bundle is 837.51 kB before gzip (255.06 kB gzip), with Vite's large-chunk advisory. No performance or capacity claim is made. The complete slice changes wire protocol to 2 and database schema to 3; document schema remains 1. Matching web/server deployment, migration and runtime invitation-table privileges are required. No Railway service, database or deployment was changed. Hosted email/login/private-note and sharing checks, scheduled backups/hosted restore, page deletion policy, compaction and recovery import remain separate work. These local results do not establish the hosted v1 release gate.
+
+## 2026-10-02: recorded hosted private-account checks
+
+This addendum reconciles previously recorded hosted checks completed at 15:42 Europe/Warsaw with the earlier deployment smoke record. Those checks used Playwright 1.63.0 / Chromium 153.0.8010.12, two authorized disposable accounts and three fresh browser contexts against the deployed private-account slice at `https://kikit.ncstudio.click`. Tests used synthetic notes and actual Resend-to-Gmail delivery, without a development identity or captured-email substitution. This documentation reconciliation did not rerun the hosted checks.
+
+- Three real magic-link emails arrived and completed sign-in. The received messages reported SPF, DKIM and DMARC pass.
+- Issued session cookies were Secure, HttpOnly, SameSite=Lax and Path=/, with seven-day lifetimes. Foreign-origin logout returned 403 without ending the session. Real logout returned 200, closed an active socket with ACCESS_DENIED/1008 and made the old cookie fail private HTTP and WSS requests with 401.
+- Private-note creation/reopening and same-account bidirectional synchronization passed. An actual offline shell reload retained a locally saved draft with device-only status; reconnect replay reached the independent peer and drained pending work through durable acknowledgement.
+- Two distinct accounts had isolated listings/journals, reciprocal private-page HTTP denial and authenticated WebSocket ACCESS_DENIED/1008 without document state. Account switching did not reveal the former account's note.
+- Logout hid the editor while retaining one pending batch and binary recovery export. Returning to the original account replayed it to pending-count zero and the independent peer. The switching/return phases reused only the disposable cookies in memory after the three real email logins.
+
+All three test sessions were signed out and rejected replay with 401; isolated browser contexts and transient sign-in files were removed. No application, deployment or infrastructure change was part of these checks. They establish hosted private-account behavior under the recorded conditions, not hosted invitations/shared pages, backup restoration, broader browser support or performance.
+
+Natural hosted renewal after one day and expiry after seven days have not been observed. Cookie issuance metadata and earlier local timestamp tests do not prove those hosted transitions. Shared-page rollout/verification and scheduled backups/hosted restore remain open; no hosted v1 release or tested recovery guarantee is claimed.
+
+## 2026-10-02: merged app-wide readability refactor
+
+[Sharing UI #6](https://github.com/NCorbeau/kikit/pull/6), [presence #7](https://github.com/NCorbeau/kikit/pull/7), and [readability #9](https://github.com/NCorbeau/kikit/pull/9) are merged. PR #9's rebased head is `690c854`; the main merge is `61933fe`. It contains five focused commits addressing all 14 actionable findings from the delegated runtime readability review. Independent final reviews found no material regressions.
+
+The refactor separates auth/account HTTP handlers from server ownership/admission/shutdown, names socket and locked sharing/receipt phases, makes browser transport and editing-permission transitions explicit, separates dialog mutation state/confirmation/focus responsibilities, extracts participant cursor plugins, and clarifies route/workspace composition. The earlier four requested WorkspaceEditor, presence, sync-room and caret-label refactors are included through PRs #6/#7. Public behavior, transaction/lock ordering, draft recovery, invitation-secret lifetime and plugin order remain intact; no dependencies or document/protocol/database versions changed.
+
+Before rebasing, local checks at `f3b0aab` passed typecheck, 77 fast tests, all 35 opted-in PostgreSQL tests, 18 editor/failure/recovery browser scenarios, all 8 authenticated production-build account/sharing/presence scenarios and the local restore/restricted-role drill. The production build passed with Vite's existing large-chunk advisory. These are refactor checks; the earlier feature Docker build above predates the refactor.
+
+The rebase onto merged main retained an identical tracked tree and unchanged patches for all five commits. [PR Actions run 37031902227](https://github.com/NCorbeau/kikit/actions/runs/37031902227) passed all four code-quality, PostgreSQL/restore and browser jobs for the rebased PR. [The previous head's dispatch](https://github.com/NCorbeau/kikit/actions/runs/37029677220) also passed all four. Tests use disposable data and captured email; GitHub-hosted CI is distinct from Railway verification.
+
+No application checks were rerun locally for this documentation-only reconciliation. The normal PR workflow still runs its code-quality, PostgreSQL/restore and browser jobs; those results are recorded on [docs PR #10](https://github.com/NCorbeau/kikit/pull/10). This update records the executed evidence above and does not deploy the merged shared-page/refactor code.

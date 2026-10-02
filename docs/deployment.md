@@ -1,6 +1,6 @@
 # Railway deployment
 
-Prepared on 2026-10-02 for the private account slice. The local implementation did not create cloud resources or secrets. Railway setup was authorized on 2026-10-02; the application and PostgreSQL are now running in Amsterdam. Live HTTPS, schema health, anonymous-access denial, and origin checks passed. Real email login and authenticated hosted editing remain unverified; scheduled backups and hosted restoration are deferred for disposable test notes.
+Prepared on 2026-10-02 for the private account slice. Railway setup was authorized on that date; the latest recorded deployment has one application instance and PostgreSQL in Amsterdam. Live HTTPS, schema health, anonymous-access denial, origin checks, real email login, private synchronization/isolation and logout recovery have recorded evidence. Natural session renewal/expiry and hosted shared pages remain unverified; scheduled backups and hosted restoration are deferred for disposable test notes. See [dated verification](verification.md). This documentation update does not deploy the merged shared-page code.
 
 ## Selected setup
 
@@ -57,7 +57,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
 TO kikit_runtime;
 ```
 
-No runtime sequence grant is needed by the current tables. Review grants after each new migration. The local restore drill exercises these grants through real account signup, page creation, loading/writing, and verifies runtime DDL denial. Hosted PostgreSQL 18.6 role creation, migration over the private network, runtime credentials on the database host, and actual runtime DDL denial were verified on 2026-10-02; application signup/writing and hosted restore checks remain pending.
+No runtime sequence grant is needed by the current tables. Review grants after each new migration. The local restore drill exercises these grants through real account signup, page creation, loading/writing, and verifies runtime DDL denial. Hosted PostgreSQL 18.6 role creation, migration over the private network, runtime credentials on the database host, and actual runtime DDL denial were verified on 2026-10-02. Later hosted checks verified private-account signup and writing; shared-page schema/runtime grants and hosted restore remain pending.
 
 ## First start and subsequent deployment
 
