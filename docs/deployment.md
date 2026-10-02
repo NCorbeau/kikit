@@ -41,7 +41,7 @@ Run schema migration as a separate one-off process in the private network using 
 node apps/server/node_modules/tsx/dist/cli.mjs apps/server/src/migrate.ts
 ```
 
-Do not attach the application's HTTP healthcheck to this one-off process. It exits after reporting that the schema is ready. Remove the process and its migration secret when finished. For an installed Node workspace the equivalent command is `pnpm db:migrate:production`. Never run `pnpm db:migrate` in production: that script explicitly opts into the development fixture and is rejected there.
+Do not attach the application's HTTP healthcheck to this one-off process. It exits after reporting that the schema is ready. Remove the process and its migration secret when finished. The initial hosted one-off service was removed after successful migration on 2026-10-02. For an installed Node workspace the equivalent command is `pnpm db:migrate:production`. Never run `pnpm db:migrate` in production: that script explicitly opts into the development fixture and is rejected there.
 
 After migration, grant the runtime role the following access in the dedicated application schema (the example uses `public`):
 
@@ -55,7 +55,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
 TO kikit_runtime;
 ```
 
-No runtime sequence grant is needed by the current tables. Review grants after each new migration. The local restore drill exercises these grants through real account signup, page creation, loading/writing, and verifies runtime DDL denial. Hosted PostgreSQL 18.6 role creation, schema migration, runtime connection over the private network, and actual runtime DDL denial were verified on 2026-10-02; application signup/writing and hosted restore checks remain pending.
+No runtime sequence grant is needed by the current tables. Review grants after each new migration. The local restore drill exercises these grants through real account signup, page creation, loading/writing, and verifies runtime DDL denial. Hosted PostgreSQL 18.6 role creation, migration over the private network, runtime credentials on the database host, and actual runtime DDL denial were verified on 2026-10-02; application signup/writing and hosted restore checks remain pending.
 
 ## First start and subsequent deployment
 
