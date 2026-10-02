@@ -1,6 +1,6 @@
 # Railway deployment
 
-Prepared on 2026-10-02 for the private account slice. Railway setup was authorized on that date; the latest recorded deployment has one application instance and PostgreSQL in Amsterdam. Live HTTPS, schema health, anonymous-access denial, origin checks, real email login, private synchronization/isolation and logout recovery have recorded evidence. Natural session renewal/expiry and hosted shared pages remain unverified; scheduled backups and hosted restoration are deferred for disposable test notes. See [dated verification](verification.md). This documentation update does not deploy the merged shared-page code.
+Updated on 2026-10-02 after the authorized shared-page rollout. Merged main `3353cc8` is deployed with one application instance and the existing PostgreSQL service in Amsterdam. Matching web/server assets use protocol 2, document schema 1 and database schema 3. Hosted two-account checks passed invitation/QR joins, concurrent editing, owner/editor controls, private-page denial, invitation invalidation, active/offline revocation, binary recovery/rejoin and transient presence/cursors. Natural session renewal/expiry remains unverified; scheduled backups and hosted restoration are deferred for disposable test notes. See [dated verification](verification.md#2026-10-02-hosted-shared-page-rollout-and-two-account-proof).
 
 ## Selected setup
 
@@ -12,7 +12,7 @@ Use Resend Free, currently 3,000 emails/month and 100/day. Add a sender subdomai
 
 ## Build and service settings
 
-The shared-page changes are verified locally and have not been deployed. They require `0002_shared_pages.sql` (database schema 3), runtime grants for `page_invitations`, and matching protocol-2 web/server assets. Follow the existing stop/drain, migration and start procedure when a deployment is authorized; the currently hosted private-account slice remains separate evidence.
+The sharing rollout applied `0002_shared_pages.sql` (database schema 3), granted the restricted runtime role access to `page_invitations`, and deployed matching protocol-2 web/server assets. Existing account/document/update/receipt fingerprints were unchanged across migration. The temporary private-network migration service was removed. Subsequent deployments still require the stop/drain procedure below; automatic deployments remain disabled.
 
 1. Use the repository root as the service root. The root `Dockerfile` builds Node 24/pnpm 12.5.1, then copies the web bundle and production server dependencies into a non-root runtime image. `.dockerignore` excludes environment files and private local agent references.
 2. Remove stale build/start overrides that target the fixture. Use the Dockerfile's default start command. Root `pnpm start` also exists for a prepared Node workspace, fixing the original Railpack detection failure; Docker is the selected build route.
@@ -57,7 +57,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
 TO kikit_runtime;
 ```
 
-No runtime sequence grant is needed by the current tables. Review grants after each new migration. The local restore drill exercises these grants through real account signup, page creation, loading/writing, and verifies runtime DDL denial. Hosted PostgreSQL 18.6 role creation, migration over the private network, runtime credentials on the database host, and actual runtime DDL denial were verified on 2026-10-02. Later hosted checks verified private-account signup and writing; shared-page schema/runtime grants and hosted restore remain pending.
+No runtime sequence grant is needed by the current tables. Review grants after each new migration. The local restore drill exercises these grants through real account signup, page creation, loading/writing, and verifies runtime DDL denial. Hosted PostgreSQL 18.6 role creation and initial private-network migration were verified on 2026-10-02. The sharing rollout rechecked schema 3, invitation privileges and actual runtime DDL denial; the new table is owned by the existing migration role. Hosted restore remains pending.
 
 ## First start and subsequent deployment
 

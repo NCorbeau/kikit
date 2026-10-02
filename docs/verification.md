@@ -242,3 +242,57 @@ Before rebasing, local checks at `f3b0aab` passed typecheck, 77 fast tests, all 
 The rebase onto merged main retained an identical tracked tree and unchanged patches for all five commits. [PR Actions run 37031902227](https://github.com/NCorbeau/kikit/actions/runs/37031902227) passed all four code-quality, PostgreSQL/restore and browser jobs for the rebased PR. [The previous head's dispatch](https://github.com/NCorbeau/kikit/actions/runs/37029677220) also passed all four. Tests use disposable data and captured email; GitHub-hosted CI is distinct from Railway verification.
 
 No application checks were rerun locally for this documentation-only reconciliation. The normal PR workflow still runs its code-quality, PostgreSQL/restore and browser jobs; those results are recorded on [docs PR #10](https://github.com/NCorbeau/kikit/pull/10). This update records the executed evidence above and does not deploy the merged shared-page/refactor code.
+
+## 2026-10-02: hosted shared-page rollout and two-account proof
+
+The user authorized the sharing rollout. Deployed a clean Git archive of merged main `3353cc802b244acabb990a50d2d4dc9e4997fbe8` to [Kikit](https://kikit.ncstudio.click). Railway deployment `be9a811e-e2bd-4838-9dd4-8c23a582197a`, created at 19:13:36 Europe/Warsaw, succeeded with image digest `sha256:f952c154412aaad5c4bf398440e09b02ce5bcefe518f7fefb485ffe061556242`. The production Dockerfile serves matching web/server assets: wire protocol 2, document schema 1, database schema 3. No application source changed for this rollout.
+
+### Migration and deployment conditions
+
+Retained the existing PostgreSQL service and volume, private database networking, Amsterdam region, and one active application instance. The previous deployment was stopped; Railway reported its instance exited. A temporary migration job waited for, then acquired, the application ownership advisory lock before changing the schema. It ran the reviewed migrations as the existing migration owner and granted the restricted runtime role invitation-table DML. Administrative credentials were confined to that temporary job, outside the application process.
+
+The job verified schema 3, migration ownership of `page_invitations`, unchanged counts and content fingerprints across the migration for all eight existing account/page/grant/update/receipt tables, and actual runtime `CREATE TABLE` denial. Runtime database/schema creation privileges remained absent. It exited successfully and was removed, including its variables. An initial temporary-job configuration attempt failed before migration; the corrected job ran in Amsterdam. No public database proxy or retained extra service was added. The new application started only after migration completed and the ownership connection closed.
+
+Railway subsequently reported exactly one running application replica and one running PostgreSQL replica, with no crashed/exited active replicas. Application logs reported startup on port 3001. The existing 30-second drain setting, zero overlap and `/api/health` check were retained. The workspace hard limit was read back as $20 before and after rollout; no plan, budget limit, email provider or backup policy changed. There was a brief stop/build/start outage; this is not an availability or deployment-duration guarantee.
+
+### Fresh local checks for the deployed tree
+
+Executed on macOS/Apple Silicon with Node 24.21.0, pnpm 12.5.1, local PostgreSQL 17.9, and Playwright 1.63.0 Chromium. Database/browser suites ran sequentially against the disposable local test database.
+
+| Check | Result |
+| --- | --- |
+| `pnpm install --frozen-lockfile` | Passed |
+| `pnpm typecheck` | Passed |
+| `pnpm test` | 77 passed; 35 opt-in PostgreSQL checks skipped |
+| `pnpm build` | Passed; existing Vite large-chunk advisory, 840.00 kB before gzip |
+| `pnpm test:integration` | All 35 passed |
+| `pnpm test:e2e:accounts` | All 8 account/sharing/presence scenarios passed |
+| `pnpm test:e2e` | All 18 editor/failure/recovery scenarios passed |
+| `COMPOSE_PROJECT_NAME=kikit pnpm test:restore` | Passed: account/session/invitation records, exact binary/receipt identity, continued writes, runtime DDL denial |
+
+These are newly executed local checks, distinct from previous CI and the hosted checks below. The local restore drill does not establish Railway restoration. The fixture suite logged a transient Vite WebSocket EPIPE during its disconnect scenario; all assertions passed.
+
+### Fresh hosted checks
+
+Completed at approximately 19:22 Europe/Warsaw against the actual HTTPS/WSS origin using Playwright 1.63.0 / Chromium 153.0.8010.12, two disposable Better Auth accounts and three independent browser contexts: one owner and two separately authenticated devices for the editor. Three actual Resend-to-Gmail links delivered at 19:16:15, 19:16:16 and 19:16:45 completed sign-in. No captured-email harness, authentication interception or development identity was used. Session values, invitation tokens and recovery bytes stayed outside public evidence.
+
+| Hosted behavior | Observed result |
+| --- | --- |
+| HTTPS/assets/schema and anonymous boundaries | App shell and both referenced assets returned 200; health returned `ready:true`; anonymous session/listing/WSS returned 401; fixture/test routes returned 404; foreign-origin mutation/authentication returned 403. |
+| Secure sessions | All three contexts received Secure, HttpOnly, SameSite=Lax session cookies; account identities distinguished the owner from the editor and matched the editor's two devices. |
+| Invitation link and QR | Owner created the link through Share; decoded QR pixels matched the same HTTPS fragment URL. Opening it sent no redemption and still returned page-session 403 until explicit Join note. |
+| Membership and permissions | Editor and owner duplicate joins returned the same page; subsequent sharing state contained exactly one owner and one editor. Editor sharing/read-management, invitation create/disable and owner-removal requests returned 403; Share was absent from the editor UI. |
+| Cross-device collaboration | The joined note appeared on the editor's independent second device. Concurrent owner/editor edits reached all three contexts, durable acknowledgement frames were observed, and reload retained the merged content. |
+| Private-page isolation | The editor's private-page HTTP request returned 403. An authenticated protocol-2 private-page socket received ACCESS_DENIED, closed with 1008, and delivered no content or presence. |
+| Invitation invalidation | Owner replacement and disable UI actions made the previous tokens return 410 while the existing editor's access and edits remained valid. |
+| Active revocation | Owner removal hid the connected editor, delivered ACCESS_DENIED, denied further page access with 403, and removed its presence. |
+| Offline revocation and recovery | The editor's second device saved two offline batches and reloaded offline with both draft additions. Escape from voluntary navigation restored editing. After removal and reconnect the editor was hidden; binary recovery contained both additions and exactly the previously stored batch IDs. The owner's document excluded those drafts while access was revoked. |
+| Explicit rejoin and replay | The removed editor explicitly rejoined through a valid invitation; the same two batch IDs received acknowledgements, both additions reached the owner, and reload reported Saved to server with pending count zero. The editor's other device could reopen the rejoined note. |
+| Presence/cursors | Participant indicators tracked authenticated devices. Title/body cursors and selections moved between fragments; cursor-only activity produced no additional edit acknowledgements. Disconnect/reconnect removed/restored presence. |
+| Visual check | Inspected desktop and 320px dark screenshots with synthetic notes; no horizontal overflow at 320px. Screenshots remain in ignored local artifacts because participant labels contain test addresses. This is not a full accessibility or native mobile keyboard audit. |
+
+A temporary-harness assertion initially assumed one participant entry per account; two editor devices correctly produced two entries. The assertion was corrected to count devices and the remaining checks completed. The offline revoked device was denied by HTTP hydration before opening a new socket, so its evidence is editor hiding/403/recovery rather than an observed socket error frame. No application defect or code change was needed.
+
+Cleanup disabled the test invitation, removed its editor membership, signed out all three sessions, and verified that replaying each old cookie returned 401. The isolated browser closed; recovery downloads were removed and in-memory recovery was discarded. Two new synthetic notes remain because note deletion is not implemented. The user's primary session and real notes were untouched by the test flow.
+
+This completes the hosted sharing rollout/proof tracked by MAC-115 under these conditions. Natural hosted session renewal/expiry, deletion/retention policy, scheduled backups and hosted restore, wider failure/browser/accessibility checks, performance, recovery import and compaction remain separate work. Disposable test-note use still has no tested hosted recovery guarantee; this checkpoint does not declare the entire v1 release complete.
