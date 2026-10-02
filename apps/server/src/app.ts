@@ -4,12 +4,13 @@ import fastifyStatic from '@fastify/static';
 import { fileURLToPath } from 'node:url';
 import type { WebSocket } from 'ws';
 import type { PoolClient } from 'pg';
-import { DATABASE_SCHEMA_VERSION, DEV_ACCOUNT_ID, DEV_PAGE_ID, DOCUMENT_SCHEMA_VERSION, MAX_WIRE_BYTES, PROTOCOL_VERSION, pageSessionSchema } from '@kikit/contracts';
+import { DATABASE_SCHEMA_VERSION, MAX_WIRE_BYTES } from '@kikit/contracts';
 import { DEFAULT_DATABASE_URL, accountConfig, fixtureEnabled, isLoopback, requireLoopbackOrigin } from './config.js';
 import { createPool } from './persistence.js';
-import { createAuth, requestHeaders, type SendMagicLink } from './auth.js';
-import { canAccessPage, createPage, listPages, type Principal } from './pages.js';
-import { AccessError } from './persistence-errors.js';
+import { createAuth, type SendMagicLink } from './auth.js';
+import { createIdentityResolver, registerAuthRoutes } from './auth-routes.js';
+import { registerAccountRoutes } from './account-routes.js';
+import type { Principal } from './pages.js';
 import { SyncRooms } from './sync-room.js';
 import { attachSyncConnection } from './sync-connection.js';
 import { registerTestRoutes, TestFaults } from './test-faults.js';
@@ -31,10 +32,13 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
   if (options.sendMagicLink && process.env.NODE_ENV !== 'test') throw new Error('Test email delivery is restricted to NODE_ENV=test.');
   const pool = createPool(options.databaseUrl ?? process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL);
   // A second account server must never own independent live rooms for this database.
-  const owner = await authOwnership(pool, fixture);
+  const ownershipConnection = await acquireServerOwnership(pool, fixture);
   const auth = config ? createAuth(pool, config, options.sendMagicLink) : undefined;
-  const app = Fastify({ logger: false, bodyLimit: 16 * 1024,
-    trustProxy: !fixture && process.env.NODE_ENV === 'production' ? (_address, hop) => hop < 1 : false });
+  const app = Fastify({
+    logger: false,
+    bodyLimit: 16 * 1024,
+    trustProxy: !fixture && process.env.NODE_ENV === 'production' ? (_address, hop) => hop < 1 : false,
+  });
   // ORM/driver errors can contain query parameters, including session tokens.
   app.setErrorHandler((error, _request, reply) => {
     const code = error && typeof error === 'object' && 'statusCode' in error ? error.statusCode : undefined;
@@ -52,7 +56,9 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
     shuttingDown = true;
     clearInterval(expiryTimer);
     for (const socket of connections) socket.close(1001, 'Server shutdown');
-    const closeTimer = setTimeout(() => { for (const socket of connections) socket.terminate(); }, 1000);
+    const closeTimer = setTimeout(() => {
+      for (const socket of connections) socket.terminate();
+    }, 1000);
     closeTimer.unref();
     await rooms.queues.drain();
     clearTimeout(closeTimer);
@@ -60,20 +66,22 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
   });
   app.addHook('onClose', async () => {
     rooms.destroy();
-    if (owner) {
-      if (!ownershipLost) await owner.query('SELECT pg_advisory_unlock(719422)').catch(() => undefined);
-      owner.release(ownershipLost);
+    if (ownershipConnection) {
+      if (!ownershipLost) await ownershipConnection.query('SELECT pg_advisory_unlock(719422)').catch(() => undefined);
+      ownershipConnection.release(ownershipLost);
     }
     await pool.end();
   });
-  owner?.on('error', () => {
+  ownershipConnection?.on('error', () => {
     ownershipLost = true;
     shuttingDown = true;
     // Stop queue admission synchronously; never keep rooms alive after losing ownership.
     void rooms.queues.drain().catch(() => undefined);
     for (const socket of connections) socket.terminate();
     console.error('Database ownership connection lost; stopping Kikit.');
-    void app.close().catch(() => { console.error('Kikit shutdown failed.'); });
+    void app.close().catch(() => {
+      console.error('Kikit shutdown failed.');
+    });
   });
   try {
     await app.register(websocket, { options: { maxPayload: MAX_WIRE_BYTES } });
@@ -92,18 +100,7 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
       reply.header('X-Frame-Options', 'DENY');
     });
 
-    async function identity(request: FastifyRequest) {
-      if (fixture) return { accountId: DEV_ACCOUNT_ID, email: 'Local development', sessionId: undefined };
-      const active = await auth!.api.getSession({ headers: authHeaders(request), query: { disableCookieCache: true, disableRefresh: true } });
-      return active ? { accountId: active.user.id, name: active.user.name, email: active.user.email, sessionId: active.session.id } : null;
-    }
-
-    function authHeaders(request: FastifyRequest): Headers {
-      const headers = requestHeaders(request.headers);
-      headers.set('x-kikit-client-ip', request.ip);
-      headers.delete('content-length');
-      return headers;
-    }
+    const identity = createIdentityResolver(fixture, auth);
 
     app.get('/api/health', async (_request, reply) => {
       try {
@@ -113,65 +110,8 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
       } catch { return reply.code(503).send({ ready: false }); }
     });
 
-    if (auth) {
-      app.route({
-        method: ['GET', 'POST'], url: '/api/auth/*',
-        handler: async (request, reply) => {
-          const response = await auth.handler(new Request(new URL(request.url, origin), {
-            method: request.method, headers: authHeaders(request),
-            ...(request.method === 'POST' ? { body: JSON.stringify(request.body ?? {}) } : {}),
-          }));
-          // Revocation is ordered behind in-flight page writes and before this response.
-          if (request.method === 'POST') await rooms.revalidate();
-          reply.code(response.status);
-          response.headers.forEach((value, key) => { if (key !== 'set-cookie') reply.header(key, value); });
-          const cookies = response.headers.getSetCookie();
-          if (cookies.length) reply.header('set-cookie', cookies);
-          return reply.send(await response.text());
-        },
-      });
-    } else {
-      app.get('/api/dev/session', async (request, reply) => {
-        if (request.headers.origin && request.headers.origin !== origin) return reply.code(403).send({ error: 'Origin denied' });
-        return { accountId: DEV_ACCOUNT_ID, pageId: DEV_PAGE_ID, protocolVersion: PROTOCOL_VERSION, schemaVersion: DOCUMENT_SCHEMA_VERSION };
-      });
-    }
-
-    app.get('/api/session', async (request, reply) => {
-      const active = await identity(request);
-      if (!active) return reply.code(401).send({ error: 'Sign in required' });
-      return { accountId: active.accountId, email: active.email, fixture };
-    });
-    app.get('/api/pages', async (request, reply) => {
-      const active = await identity(request);
-      if (!active) return reply.code(401).send({ error: 'Sign in required' });
-      reply.header('X-Kikit-Account', active.accountId);
-      return listPages(pool, active.accountId);
-    });
-    app.post('/api/pages', { bodyLimit: 1024 }, async (request, reply) => {
-      if (fixture) return reply.code(403).send({ error: 'Page creation requires an account' });
-      const active = await identity(request);
-      if (!active) return reply.code(401).send({ error: 'Sign in required' });
-      const parsed = pageSessionSchema.shape.pageId.safeParse((request.body as { id?: unknown } | null)?.id);
-      if (!parsed.success) return reply.code(400).send({ error: 'A valid page ID is required' });
-      try {
-        const page = await createPage(pool, parsed.data, active);
-        reply.header('X-Kikit-Account', active.accountId);
-        return page;
-      }
-      catch (error) {
-        if (error instanceof AccessError) return reply.code(403).send({ error: 'Page access denied' });
-        return reply.code(503).send({ error: 'Could not create the note. Try again.' });
-      }
-    });
-    app.get<{ Params: { pageId: string } }>('/api/pages/:pageId/session', async (request, reply) => {
-      const active = await identity(request);
-      if (!active) return reply.code(401).send({ error: 'Sign in required' });
-      if (!pageSessionSchema.shape.pageId.safeParse(request.params.pageId).success) return reply.code(400).send({ error: 'Invalid page ID' });
-      if (!await canAccessPage(pool, request.params.pageId, active)) return reply.code(403).send({ error: 'Page access denied' });
-      return { accountId: active.accountId, pageId: request.params.pageId, protocolVersion: PROTOCOL_VERSION, schemaVersion: DOCUMENT_SCHEMA_VERSION };
-    });
-
+    registerAuthRoutes(app, auth, origin, rooms);
+    registerAccountRoutes(app, pool, identity, fixture);
     registerSharingRoutes(app, pool, rooms, identity);
     registerTestRoutes(app, faults, () => ({ ...rooms.queues.metrics, rooms: rooms.size, connections: connections.size }));
     app.get('/api/sync', {
@@ -188,11 +128,13 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
       attachSyncConnection(socket, rooms, () => connections.delete(socket), socketPrincipals.get(request)!);
     });
 
-    let checking = false;
+    let revalidating = false;
     expiryTimer = auth ? setInterval(() => {
-      if (checking || shuttingDown) return;
-      checking = true;
-      void rooms.revalidate().finally(() => { checking = false; });
+      if (revalidating || shuttingDown) return;
+      revalidating = true;
+      void rooms.revalidate().finally(() => {
+        revalidating = false;
+      });
     }, 10_000) : undefined;
     expiryTimer?.unref();
 
@@ -210,7 +152,7 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
   }
 }
 
-async function authOwnership(pool: ReturnType<typeof createPool>, fixture: boolean) {
+async function acquireServerOwnership(pool: ReturnType<typeof createPool>, fixture: boolean) {
   if (fixture) return undefined;
   let client: PoolClient | undefined;
   try {

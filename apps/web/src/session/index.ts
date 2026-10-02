@@ -104,7 +104,7 @@ class Session implements DocumentSession {
   private synchronized = false;
   private terminalError = false;
   private editingLocked = false;
-  private pausedEditable?: boolean;
+  private editingAllowedBeforePause?: boolean;
   private connectionEpoch = 0;
   private incompatibleCache: StoredUpdate[] = [];
   private inFlightBatchId?: string;
@@ -359,10 +359,15 @@ class Session implements DocumentSession {
 
   private stopForIncompatibleCache(error: unknown): void {
     if (!(error instanceof CacheCompatibilityError)) return;
-    this.editingLocked = true;
-    this.pausedEditable = false;
+    this.lockEditingUntilVerifiedSync();
     this.terminalError = true;
     this.transport.stopWithError();
+  }
+
+  private lockEditingUntilVerifiedSync(): void {
+    this.editingLocked = true;
+    // A terminal denial supersedes any permission saved by voluntary navigation.
+    this.editingAllowedBeforePause = false;
   }
 
   private clearInFlightBatch(): void {
@@ -373,7 +378,7 @@ class Session implements DocumentSession {
   private failRemote(message: string, terminal: boolean): void {
     this.remoteError = message;
     this.terminalError = terminal;
-    if (terminal) { this.editingLocked = true; this.pausedEditable = false; }
+    if (terminal) this.lockEditingUntilVerifiedSync();
     this.clearInFlightBatch();
     this.synchronized = false;
     this.presence.disconnect();
@@ -393,10 +398,7 @@ class Session implements DocumentSession {
     this.appendError = null;
     this.receiptError = null;
     this.remoteError = null;
-    // Canceling a voluntary departure can resume cached writing offline. A
-    // genuine access/compatibility denial still requires verified synchronization.
-    if (this.pausedEditable) this.editingLocked = false;
-    this.pausedEditable = undefined;
+    this.restoreEditingAfterPause();
     this.terminalError = false;
     this.synchronized = false;
     this.clearInFlightBatch();
@@ -404,6 +406,13 @@ class Session implements DocumentSession {
     void this.flush().then(() => {
       if (!this.destroyed && !this.appendError) this.transport.retry();
     });
+  }
+
+  private restoreEditingAfterPause(): void {
+    // Canceling a voluntary departure can resume cached writing offline. A
+    // genuine access/compatibility denial still requires verified synchronization.
+    if (this.editingAllowedBeforePause) this.editingLocked = false;
+    this.editingAllowedBeforePause = undefined;
   }
 
   exportRecovery(): string {
@@ -432,7 +441,8 @@ class Session implements DocumentSession {
   }
 
   async pause(): Promise<void> {
-    this.pausedEditable ??= !this.editingLocked;
+    // Repeated pauses retain the original permission; terminal denial clears it.
+    this.editingAllowedBeforePause ??= !this.editingLocked;
     this.presence.disconnect();
     this.editingLocked = true;
     this.terminalError = true;

@@ -24,6 +24,19 @@ export interface CommitHooks {
   sessionId?: string;
 }
 
+interface StoredReceipt {
+  payloadHash: string;
+  sequence: number;
+  payload: Buffer;
+}
+interface NewBatch {
+  pageId: string;
+  batchId: string;
+  payloadHash: string;
+  sequence: number;
+  update: Uint8Array;
+}
+
 export function createPool(connectionString: string): pg.Pool {
   const pool = new pg.Pool({
     connectionString,
@@ -114,32 +127,20 @@ export async function commitUpdate(
     await client.query('BEGIN');
     await lockSession(db, { accountId, sessionId: hooks.sessionId });
     const page = await authorizeLockedPage(db, pageId, accountId);
-    const [receipt] = await db.select({
-      payloadHash: receipts.payloadHash,
-      sequence: receipts.sequence,
-      payload: documentUpdates.payload,
-    }).from(receipts)
-      .innerJoin(documentUpdates, and(
-        eq(documentUpdates.pageId, receipts.pageId),
-        eq(documentUpdates.sequence, receipts.sequence),
-      ))
-      .where(and(eq(receipts.pageId, pageId), eq(receipts.batchId, batchId)));
+    const receipt = await findCommittedReceipt(db, pageId, batchId);
     // Receipt lookup precedes validation: retries recover the original commit and repair.
     if (receipt) {
       if (receipt.payloadHash !== payloadHash) {
         throw new ReceiptConflict('Batch identity already belongs to different bytes');
       }
       await client.query('COMMIT');
-      const repairedPayload = receipt.payload.equals(update) ? {} : { committedUpdate: receipt.payload };
-      return { sequence: receipt.sequence, duplicate: true, ...repairedPayload };
+      return duplicateCommitResult(receipt, update);
     }
 
     // Hash immutable client bytes; validation may add a repair to the stored payload.
     const committedUpdate = hooks.validate?.() ?? update;
     const sequence = page.sequence + 1;
-    await db.insert(documentUpdates).values({ pageId, sequence, payload: Buffer.from(committedUpdate) });
-    await db.insert(receipts).values({ pageId, batchId, payloadHash, sequence });
-    await db.update(pages).set({ sequence, ...(hooks.projectTitle ? { title: hooks.projectTitle() } : {}) }).where(eq(pages.id, pageId));
+    await storeNewBatch(db, { pageId, batchId, payloadHash, sequence, update: committedUpdate }, hooks);
     await hooks.beforeCommit?.();
     // No client timeout races this transaction. Unknown results stay unacknowledged.
     await client.query('COMMIT');
@@ -156,4 +157,39 @@ export async function commitUpdate(
   } finally {
     client.release(discardConnection);
   }
+}
+
+async function findCommittedReceipt(
+  db: NodePgDatabase,
+  pageId: string,
+  batchId: string,
+): Promise<StoredReceipt | undefined> {
+  const [receipt] = await db.select({
+    payloadHash: receipts.payloadHash,
+    sequence: receipts.sequence,
+    payload: documentUpdates.payload,
+  }).from(receipts)
+    .innerJoin(documentUpdates, and(
+      eq(documentUpdates.pageId, receipts.pageId),
+      eq(documentUpdates.sequence, receipts.sequence),
+    ))
+    .where(and(eq(receipts.pageId, pageId), eq(receipts.batchId, batchId)));
+  return receipt;
+}
+
+function duplicateCommitResult(receipt: StoredReceipt, submittedUpdate: Uint8Array): CommitResult {
+  // Return the originally stored repair, never generate another one on replay.
+  const repairedPayload = receipt.payload.equals(submittedUpdate) ? {} : { committedUpdate: receipt.payload };
+  return { sequence: receipt.sequence, duplicate: true, ...repairedPayload };
+}
+
+/** These writes share the caller's transaction and follow candidate validation. */
+async function storeNewBatch(db: NodePgDatabase, batch: NewBatch, hooks: CommitHooks): Promise<void> {
+  const { pageId, batchId, payloadHash, sequence, update } = batch;
+  await db.insert(documentUpdates).values({ pageId, sequence, payload: Buffer.from(update) });
+  await db.insert(receipts).values({ pageId, batchId, payloadHash, sequence });
+  await db.update(pages).set({
+    sequence,
+    ...(hooks.projectTitle ? { title: hooks.projectTitle() } : {}),
+  }).where(eq(pages.id, pageId));
 }

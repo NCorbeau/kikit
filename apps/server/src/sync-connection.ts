@@ -15,6 +15,11 @@ import type { SyncRooms } from './sync-room.js';
 import type { Principal } from './pages.js';
 import { OverloadError } from './queue.js';
 
+type HelloMessage = Extract<ClientMessage, { type: 'hello' }>;
+type PresenceMessage = Extract<ClientMessage, { type: 'presence' }>;
+type UpdateMessage = Extract<ClientMessage, { type: 'update' }>;
+const MAX_PRESENCE_FRAMES_PER_SECOND = 20;
+
 /** One connection owns its handshake deadline and page association. */
 export function attachSyncConnection(
   socket: WebSocket,
@@ -35,7 +40,9 @@ export function attachSyncConnection(
     if (pageId) rooms.leave(pageId, socket);
   });
 
-  socket.on('message', (data, binary) => {
+  socket.on('message', receiveMessage);
+
+  function receiveMessage(data: RawData, binary: boolean): void {
     let message: ClientMessage;
     try {
       message = parseClientMessage(data, binary);
@@ -44,22 +51,7 @@ export function attachSyncConnection(
       return;
     }
     if (message.type === 'hello') {
-      if (helloReceived) {
-        reportFailure(socket, new InvalidDocument());
-        return;
-      }
-      helloReceived = true;
-      clearTimeout(handshakeTimer);
-      pageId = message.pageId;
-      if (message.protocolVersion !== PROTOCOL_VERSION || message.schemaVersion !== DOCUMENT_SCHEMA_VERSION) {
-        reportFailure(socket, new CompatibilityError());
-        return;
-      }
-      if (message.accountId !== (principal?.accountId ?? DEV_ACCOUNT_ID)) {
-        reportFailure(socket, new AccessError('Account changed before synchronization'));
-        return;
-      }
-      void rooms.join(pageId, socket, principal).catch(error => reportFailure(socket, error));
+      handleHello(message);
       return;
     }
     if (!pageId || !helloReceived) {
@@ -67,31 +59,72 @@ export function attachSyncConnection(
       return;
     }
     if (message.type === 'presence') {
-      // Drop excess motion before it can consume page-queue or database work.
-      const now = Date.now();
-      if (now - presenceWindow >= 1000 || now < presenceWindow) { presenceWindow = now; presenceFrames = 0; }
-      if (++presenceFrames > 20) return;
-      try {
-        const update = decodeUpdate(message.update);
-        if (update.byteLength > MAX_PRESENCE_BYTES) throw new InvalidDocument();
-        void rooms.presence(pageId, socket, update).catch(error => {
-          // Transient state can be dropped under overload; durable work keeps its retry contract.
-          if (!(error instanceof OverloadError)) reportFailure(socket, error);
-        });
-      } catch (error) { reportFailure(socket, error); }
+      handlePresence(pageId, message);
       return;
     }
+    handleDocumentUpdate(pageId, message);
+  }
+
+  function handleHello(message: HelloMessage): void {
+    if (helloReceived) {
+      reportFailure(socket, new InvalidDocument());
+      return;
+    }
+    // Record the attempt here; page authorization and admission finish in the queue.
+    helloReceived = true;
+    clearTimeout(handshakeTimer);
+    pageId = message.pageId;
+    if (message.protocolVersion !== PROTOCOL_VERSION || message.schemaVersion !== DOCUMENT_SCHEMA_VERSION) {
+      reportFailure(socket, new CompatibilityError());
+      return;
+    }
+    if (message.accountId !== (principal?.accountId ?? DEV_ACCOUNT_ID)) {
+      reportFailure(socket, new AccessError('Account changed before synchronization'));
+      return;
+    }
+    void rooms.join(pageId, socket, principal).catch(error => reportFailure(socket, error));
+  }
+
+  function admitPresenceFrame(): boolean {
+    const now = Date.now();
+    if (now - presenceWindow >= 1000 || now < presenceWindow) {
+      presenceWindow = now;
+      presenceFrames = 0;
+    }
+    return ++presenceFrames <= MAX_PRESENCE_FRAMES_PER_SECOND;
+  }
+
+  function handlePresence(targetPageId: string, message: PresenceMessage): void {
+    // Drop excess motion before it can consume page-queue or database work.
+    if (!admitPresenceFrame()) return;
+    try {
+      const update = decodeBoundedUpdate(message.update, MAX_PRESENCE_BYTES);
+      void rooms.presence(targetPageId, socket, update).catch(error => {
+        // Transient state can be dropped under overload; durable work keeps its retry contract.
+        if (!(error instanceof OverloadError)) reportFailure(socket, error);
+      });
+    } catch (error) {
+      reportFailure(socket, error);
+    }
+  }
+
+  function handleDocumentUpdate(targetPageId: string, message: UpdateMessage): void {
     let update: Uint8Array;
     try {
-      update = decodeUpdate(message.update);
-      if (update.byteLength > MAX_UPDATE_BYTES) throw new InvalidDocument();
+      update = decodeBoundedUpdate(message.update, MAX_UPDATE_BYTES);
     } catch {
       reportFailure(socket, new InvalidDocument(), message.batchId);
       return;
     }
-    void rooms.update(pageId, socket, message, update)
+    void rooms.update(targetPageId, socket, message, update)
       .catch(error => reportFailure(socket, error, message.batchId));
-  });
+  }
+}
+
+function decodeBoundedUpdate(encoded: string, maxBytes: number): Uint8Array {
+  const update = decodeUpdate(encoded);
+  if (update.byteLength > maxBytes) throw new InvalidDocument();
+  return update;
 }
 
 function parseClientMessage(data: RawData, binary: boolean): ClientMessage {
@@ -99,6 +132,8 @@ function parseClientMessage(data: RawData, binary: boolean): ClientMessage {
   try {
     const parsed = clientMessageSchema.safeParse(JSON.parse(data.toString()));
     if (parsed.success) return parsed.data;
-  } catch { /* Malformed JSON and unsupported messages share the same protocol failure. */ }
+  } catch {
+    // Malformed JSON and unsupported messages share the same protocol failure.
+  }
   throw new InvalidDocument();
 }

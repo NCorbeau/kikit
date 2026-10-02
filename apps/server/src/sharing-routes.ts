@@ -10,6 +10,8 @@ import {
 } from './sharing.js';
 
 type PageRequest = FastifyRequest<{ Params: { pageId: string; accountId?: string } }>;
+type MemberRequest = FastifyRequest<{ Params: { pageId: string; accountId: string } }>;
+type SharingAction = (active: Principal) => Promise<unknown>;
 
 /** Account identity, invitation redemption and page permissions remain separate. */
 export function registerSharingRoutes(
@@ -18,7 +20,7 @@ export function registerSharingRoutes(
   rooms: SyncRooms,
   identity: (request: FastifyRequest) => Promise<Principal | null>,
 ) {
-  async function principal(request: FastifyRequest, reply: FastifyReply) {
+  async function requireSharingPrincipal(request: FastifyRequest, reply: FastifyReply) {
     const active = await identity(request);
     if (!active?.sessionId) {
       reply.code(401).send({ error: 'Sign in required' });
@@ -33,13 +35,13 @@ export function registerSharingRoutes(
     }
     return active;
   }
-  function failure(reply: FastifyReply, error: unknown) {
+  function sendSharingFailure(reply: FastifyReply, error: unknown) {
     if (error instanceof InvitationError) return reply.code(410).send({ error: 'This invitation is invalid or no longer available.' });
     if (error instanceof AccessError) return reply.code(403).send({ error: 'Page access denied' });
     return reply.code(503).send({ error: 'Could not update sharing. Try again.' });
   }
-  async function pageAction(request: PageRequest, reply: FastifyReply, action: (active: Principal) => Promise<unknown>) {
-    const active = await principal(request, reply);
+  async function authorizedPageAction(request: PageRequest, reply: FastifyReply, action: SharingAction) {
+    const active = await requireSharingPrincipal(request, reply);
     if (!active) return;
     if (!pageSessionSchema.shape.pageId.safeParse(request.params.pageId).success) {
       return reply.code(400).send({ error: 'Invalid page ID' });
@@ -48,27 +50,44 @@ export function registerSharingRoutes(
       const result = await action(active);
       reply.header('X-Kikit-Account', active.accountId);
       return result;
-    } catch (error) { return failure(reply, error); }
+    } catch (error) {
+      return sendSharingFailure(reply, error);
+    }
   }
-  app.get<{ Params: { pageId: string } }>('/api/pages/:pageId/sharing', async (request, reply) =>
-    pageAction(request, reply, active => getSharing(pool, request.params.pageId, active)));
-  app.post<{ Params: { pageId: string } }>('/api/pages/:pageId/invitation', { bodyLimit: 1024 }, async (request, reply) =>
-    pageAction(request, reply, active => rooms.accessMutation(request.params.pageId,
-      () => replaceInvitation(pool, request.params.pageId, active))));
-  app.delete<{ Params: { pageId: string } }>('/api/pages/:pageId/invitation', async (request, reply) =>
-    pageAction(request, reply, active => rooms.accessMutation(request.params.pageId, async () => {
+
+  /** Validate the HTTP principal before ordering the mutation with page writes. */
+  function queuedPageMutation(request: PageRequest, reply: FastifyReply, mutation: SharingAction) {
+    return authorizedPageAction(request, reply, active =>
+      rooms.accessMutation(request.params.pageId, () => mutation(active)));
+  }
+
+  function getPageSharing(request: PageRequest, reply: FastifyReply) {
+    return authorizedPageAction(request, reply, active => getSharing(pool, request.params.pageId, active));
+  }
+
+  function replacePageInvitation(request: PageRequest, reply: FastifyReply) {
+    return queuedPageMutation(request, reply, active => replaceInvitation(pool, request.params.pageId, active));
+  }
+
+  function disablePageInvitation(request: PageRequest, reply: FastifyReply) {
+    return queuedPageMutation(request, reply, async active => {
       await disableInvitation(pool, request.params.pageId, active);
       return { success: true };
-    })));
-  app.delete<{ Params: { pageId: string; accountId: string } }>('/api/pages/:pageId/members/:accountId', async (request, reply) => {
-    if (!request.params.accountId || request.params.accountId.length > 200) return reply.code(400).send({ error: 'Invalid member' });
-    return pageAction(request, reply, active => rooms.accessMutation(request.params.pageId, async () => {
+    });
+  }
+
+  function removePageEditor(request: MemberRequest, reply: FastifyReply) {
+    if (!request.params.accountId || request.params.accountId.length > 200) {
+      return reply.code(400).send({ error: 'Invalid member' });
+    }
+    return queuedPageMutation(request, reply, async active => {
       await removeMember(pool, request.params.pageId, request.params.accountId, active);
       return { success: true };
-    }));
-  });
-  app.post('/api/invitations/join', { bodyLimit: 1024 }, async (request, reply) => {
-    const active = await principal(request, reply);
+    });
+  }
+
+  async function redeemInvitation(request: FastifyRequest, reply: FastifyReply) {
+    const active = await requireSharingPrincipal(request, reply);
     if (!active) return;
     const parsed = joinInvitationSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid invitation' });
@@ -78,6 +97,14 @@ export function registerSharingRoutes(
       const page = await rooms.accessMutation(pageId, () => joinInvitation(pool, pageId, parsed.data.token, active));
       reply.header('X-Kikit-Account', active.accountId);
       return page;
-    } catch (error) { return failure(reply, error); }
-  });
+    } catch (error) {
+      return sendSharingFailure(reply, error);
+    }
+  }
+
+  app.get<{ Params: { pageId: string } }>('/api/pages/:pageId/sharing', getPageSharing);
+  app.post<{ Params: { pageId: string } }>('/api/pages/:pageId/invitation', { bodyLimit: 1024 }, replacePageInvitation);
+  app.delete<{ Params: { pageId: string } }>('/api/pages/:pageId/invitation', disablePageInvitation);
+  app.delete<{ Params: { pageId: string; accountId: string } }>('/api/pages/:pageId/members/:accountId', removePageEditor);
+  app.post('/api/invitations/join', { bodyLimit: 1024 }, redeemInvitation);
 }
