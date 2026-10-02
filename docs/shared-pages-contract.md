@@ -56,4 +56,4 @@ While concurrent deletions leave the shared body temporarily empty, cursor-only 
 
 ## Release boundary
 
-Two distinct real Better Auth accounts must demonstrate invitation joins, owner/editor boundaries, concurrent durable editing, invitation invalidation, active/offline revocation and recovery. Local captured-email tests establish local behavior only. Hosted login/private-account checks and hosted sharing verification remain separate evidence. Page deletion requires the separate retention/recovery policy decision.
+Two distinct real Better Auth accounts must demonstrate invitation joins, owner/editor boundaries, concurrent durable editing, invitation invalidation, active/offline revocation and recovery. Local captured-email tests establish local behavior only. The matching sharing build was deployed on 2026-10-02 and passed these hosted checks with actual email login and three independent Chromium contexts; see [dated evidence](verification.md#2026-10-02-hosted-shared-page-rollout-and-two-account-proof). Page deletion requires the separate retention/recovery policy decision; hosted auth renewal/expiry and backup/restore remain open.
