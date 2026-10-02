@@ -4,7 +4,7 @@
 
 Kikit is a small, local-first notes app built around a simple block editor. Its goal is to make writing feel immediate, keep your work safe through connection changes, and let people work together on the same page.
 
-**Status: private account slice implemented and verified locally.** Email magic links, account-scoped notes, authenticated synchronization, and recovery across logout are implemented alongside the original editor and durability checks. A production Docker image is available. Railway PostgreSQL is provisioned and migrated; app deployment, real sender verification, and a hosted backup restore remain pending. Invitations and shared-page controls are deferred; this is not the complete v1 release.
+**Status: private account slice deployed on Railway.** Email magic links, account-scoped notes, authenticated synchronization, and recovery across logout are implemented and verified locally. The production Docker image and migrated PostgreSQL database are running in Amsterdam. Live HTTPS, database health, anonymous-access denial, and origin checks passed on 2026-10-02. Real email login and authenticated hosted editing remain to be checked. Backups and hosted restore are deferred for disposable test notes. Invitations and shared-page controls are deferred; this is not the complete v1 release.
 
 ![Typing in two independent Kikit windows, with edits synchronizing in both directions](docs/demos/live-sync.gif)
 
@@ -136,12 +136,12 @@ Test fault/metrics routes only exist with `NODE_ENV=test` **and** `KIKIT_TEST_FA
 - Full-state handshakes and retained binary update histories; no snapshot compaction/pruning. Updates are limited to 256 KiB and committed documents to 2 MiB. These are guardrails, not measured capacity claims.
 - Queues admit at most 64 operations/8 MiB per page and 256 operations/32 MiB globally, including running work. At most 128 sockets; each socket has a 4 MiB outbound budget. Overload leaves uncommitted edits pending.
 - PostgreSQL applies 5-second statement, 2-second lock, and 15-second transaction limits. Queue ownership stays with an operation until completion/rollback. Shutdown stops admission, rejects queued work, and waits for active operations; a network blackhole can still delay shutdown. No deployment deadline or production availability target is claimed.
-- Binary recovery export has no import UI yet. The local backup/restore and restricted-role drill is automated; hosted backups and privileges still require setup and verification. No performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
-- The Docker image serves the production bundle. External HTTPS/email/backup configuration remains required. The editor bundle produces Vite's large-chunk advisory.
+- Binary recovery export has no import UI yet. The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; backups and hosted restoration remain deferred until before valuable notes. No performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
+- The Docker image serves the production bundle. Hosted HTTPS and startup are verified; real email delivery and authenticated hosted editing remain unverified. The editor bundle produces Vite's large-chunk advisory.
 
-The next release gates are actual Railway/email/backup verification, followed by invitations and collaboration with two distinct authenticated accounts. The private account slice does not satisfy the shared-page v1 gate.
+The next release gates are real hosted email login and authenticated editing/synchronization, tested hosted backups before valuable notes, and invitations/collaboration with two distinct authenticated accounts. The private account slice does not satisfy the shared-page v1 gate.
 
-The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, with scheduled backups deferred for disposable test notes. Tested backups and restoration are required before valuable notes. The local checks provisioned no paid infrastructure. Railway setup was subsequently authorized on 2026-10-02; the hosted PostgreSQL migration and restricted-runtime DDL denial have passed, while app/email/backup verification is in progress. See [deployment](docs/deployment.md) for remaining setup and recovery limits.
+The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, with scheduled backups deferred for disposable test notes. Tested backups and restoration are required before valuable notes. The local checks provisioned no paid infrastructure. Railway setup was subsequently authorized on 2026-10-02; the hosted PostgreSQL migration, restricted-runtime DDL denial, application startup, and HTTPS/access smoke checks have passed. Real email login and hosted authenticated editing remain unverified. See [deployment](docs/deployment.md) for remaining setup and recovery limits.
 
 ## License
 

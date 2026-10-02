@@ -109,3 +109,25 @@ The user authorized provisioning and deployment, selecting a $5/month Kikit reso
 The committed account slice was published in a reviewable pull request and typecheck was rerun after merging the current main instructions; it passed. Railway built its Dockerfile successfully on Linux AMD64. A PostgreSQL 18.6 service and persistent volume were provisioned in Amsterdam with no public TCP proxy. Separate migration/runtime roles were created. The first migration attempt was denied at Drizzle's `CREATE SCHEMA IF NOT EXISTS`; granting database-level `CREATE` to the migration role allowed the reviewed migrations to complete. The runtime role connected, read schema version 2, had no database/schema `CREATE` privilege, and an actual table creation was denied. This supplements the earlier local PostgreSQL 17.9 evidence.
 
 A custom application domain was registered. At this checkpoint the CNAME had propagated; ownership TXT verification and HTTPS issuance remained pending. The sender/key, application startup, actual email login, and two-account hosted isolation/synchronization remain unverified. The CLI/API rejected scheduling daily backups with `Not Authorized`; no schedule or hosted restore has been claimed as complete. Backup scheduling is a user dashboard step until that provider authorization issue is resolved.
+
+## 2026-10-02: First Railway application deployment
+
+Deployed a clean Git archive of commit `9419e56` through Railway CLI. The Linux AMD64 Docker build and application deployment succeeded. Railway reported exactly one running application replica and one running PostgreSQL replica in Amsterdam, with no crashed/exited replicas. Runtime logs reported application startup on port 3001. The temporary migration service is removed; no extra application replica or public database proxy was introduced.
+
+Custom-domain ownership and HTTPS certificates are verified. The Resend API key was initially a staged Railway variable; it was applied without triggering an automatic deployment, then the committed application snapshot was deployed. Secret values were not printed or included in the upload. No test email was sent. A read-only Resend domain query returned `restricted_api_key`; the configured key cannot inspect sender-domain verification.
+
+Checks against the actual public HTTPS origin passed:
+
+- Application HTML and both referenced JavaScript/CSS assets returned 200.
+- Responses had `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY`.
+- `/api/health` returned 200 with `{ready:true}`, confirming the runtime database/schema check.
+- Anonymous `/api/session` and `/api/pages` requests returned 401.
+- Anonymous WSS upgrade at `/api/sync`, with the correct origin, returned 401.
+- Foreign-origin page mutation and magic-link sign-in requests returned 403.
+- Development session and test-metrics routes returned 404.
+
+Real sender-domain delivery, magic-link login and secure cookies through the hosted proxy, authenticated note creation/editing, and two-account hosted isolation/synchronization remain unverified. Earlier local account browser tests cover those application behaviors with captured email delivery; they are not evidence of real hosted email delivery. Invitations and the shared-page v1 release gate remain deferred.
+
+The user chose to defer scheduled backups and the hosted restore drill for disposable test notes. Neither has been completed. Tested hosted recovery is required before valuable notes; this first deployment establishes no hosted recovery, availability, capacity, or latency guarantee.
+
+The Notion planning summaries still describe accounts as unfinished and deployment as future work. Their status has not been changed during this deployment check; the repository evidence above is current.

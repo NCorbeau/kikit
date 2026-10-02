@@ -1,6 +1,6 @@
 # Railway deployment
 
-Prepared on 2026-10-02 for the private account slice. The local implementation did not create cloud resources or secrets. Railway setup was authorized on 2026-10-02; hosted configuration and verification remain pending.
+Prepared on 2026-10-02 for the private account slice. The local implementation did not create cloud resources or secrets. Railway setup was authorized on 2026-10-02; the application and PostgreSQL are now running in Amsterdam. Live HTTPS, schema health, anonymous-access denial, and origin checks passed. Real email login and authenticated hosted editing remain unverified; scheduled backups and hosted restoration are deferred for disposable test notes.
 
 ## Selected setup
 
