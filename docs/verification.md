@@ -152,4 +152,12 @@ Downloaded both uploaded archives and verified their published SHA-256 digests a
 
 An earlier hosted drill, [run 37016360196](https://github.com/NCorbeau/kikit/actions/runs/37016360196), verified the same boundary before refreshing two action pins to their current Node 24 runtimes. The new runtime pins passed the repeated upload/drain drill without the older Node 20 runtime warning.
 
-The temporary failure assertions have been removed. After adding the collection-failure reporter regression, typecheck, the 41-test fast suite, actionlint, and representative fixture/account browser scenarios passed locally again. A full successful run of the clean PR head remains pending at this checkpoint. Merge/default-branch execution and repository rulesets requiring these checks remain separate evidence; this PR does not deploy the application or complete other v1 gates.
+The temporary failure assertions have been removed. After adding the collection-failure reporter regression, typecheck, the 41-test fast suite, actionlint, and representative fixture/account browser scenarios passed locally again.
+
+### Restore cleanup correction
+
+The first clean hosted run, [37017479506](https://github.com/NCorbeau/kikit/actions/runs/37017479506), passed code quality, all 20 PostgreSQL integration tests, and both complete browser suites. Its restore assertions passed, but an idle pool emitted an unhandled PostgreSQL termination error during database cleanup. The failure dumped a disposable client's connection details; the isolated CI database/volume were removed, and that run's log was deleted. No production credentials or notes were supplied to the run.
+
+The restore harness now handles pool errors with static diagnostics, waits for actual client disconnect events after pool draining, removes databases without forced termination, and reports success only after cleanup completes. A regression runs the command with an injected secret-bearing driver error before any database connection and verifies exit code 1 without the secret in output. Typecheck and the resulting 42-test fast suite passed locally; the real restore/restricted-role drill passed three consecutive local runs. The corrected clean hosted run is pending at this checkpoint.
+
+Merge/default-branch execution and repository rulesets requiring these checks remain separate evidence; this PR does not deploy the application or complete other v1 gates.
