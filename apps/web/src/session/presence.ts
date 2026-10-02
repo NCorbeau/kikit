@@ -33,8 +33,16 @@ export class DocumentPresence {
 
   private readonly changed = (): void => {
     if (this.destroyed) return;
+    const participants = this.readParticipants();
+    if (this.snapshot.connected === this.connected && sameParticipants(this.snapshot.participants, participants)) return;
+    this.snapshot = { connected: this.connected, participants };
+    for (const listener of this.listeners) listener();
+  };
+
+  private readParticipants(): Participant[] {
+    if (!this.connected) return [];
     const participants: Participant[] = [];
-    if (this.connected) for (const [clientId, state] of this.awareness.getStates()) {
+    for (const [clientId, state] of this.awareness.getStates()) {
       const user = state.user;
       if (!user || typeof user.accountId !== 'string' || typeof user.name !== 'string') continue;
       participants.push({
@@ -44,15 +52,8 @@ export class DocumentPresence {
       });
     }
     participants.sort((a, b) => Number(b.local) - Number(a.local) || a.clientId - b.clientId);
-    if (this.snapshot.connected === this.connected && participants.length === this.snapshot.participants.length
-      && participants.every((item, index) => {
-        const previous = this.snapshot.participants[index]!;
-        return item.clientId === previous.clientId && item.accountId === previous.accountId
-          && item.name === previous.name && item.color === previous.color && item.local === previous.local;
-      })) return;
-    this.snapshot = { connected: this.connected, participants };
-    for (const listener of this.listeners) listener();
-  };
+    return participants;
+  }
 
   private readonly updated = ({ added, updated, removed }: AwarenessChange, origin: unknown): void => {
     if (!this.connected || this.destroyed || origin === REMOTE_PRESENCE
@@ -107,4 +108,15 @@ export class DocumentPresence {
     this.awareness.destroy();
     this.listeners.clear();
   }
+}
+
+function sameParticipants(first: Participant[], second: Participant[]): boolean {
+  return first.length === second.length && first.every((participant, index) => {
+    const other = second[index]!;
+    return participant.clientId === other.clientId
+      && participant.accountId === other.accountId
+      && participant.name === other.name
+      && participant.color === other.color
+      && participant.local === other.local;
+  });
 }
