@@ -165,3 +165,7 @@ The restore harness now handles pool errors with static diagnostics, waits for a
 [Actions run 37018439030](https://github.com/NCorbeau/kikit/actions/runs/37018439030) passed all four jobs on the proposed merge for PR 4 at code commit `7157669`: frozen install, typecheck, build, 42 fast tests (20 database tests skipped there), all 20 opted-in PostgreSQL tests, the corrected restore/restricted-role drill, all 18 fixture browser scenarios, and both authenticated production-build browser scenarios. All database cleanup steps passed. The browser jobs used one worker without retries; the existing Vite large-chunk advisory remains. This establishes working hosted CI for the proposed change, with separate recorded failure-upload evidence above.
 
 Merge/default-branch execution and repository rulesets requiring these checks remain separate evidence; this PR does not deploy the application or complete other v1 gates.
+
+### Restore drill readability refactor · 2026-10-02
+
+Extracted named setup, sign-in, page creation, restored-session/page verification, and cleanup functions in `scripts/verify-backup-restore.ts`. Session and committed-page data have explicit types; the scenario retains every restore assertion, static failure diagnostics, and client-disconnect ordering. `pnpm typecheck`, `pnpm exec vitest run scripts/verify-backup-restore.test.ts` (one failure-diagnostic regression), and `pnpm test:restore` passed locally against the existing PostgreSQL 17.9 Compose service. These are checks for the refactor; the full hosted suite above was recorded before it.
