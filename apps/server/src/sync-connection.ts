@@ -10,12 +10,14 @@ import {
 import { CompatibilityError } from './persistence.js';
 import { InvalidDocument, reportFailure } from './sync-protocol.js';
 import type { SyncRooms } from './sync-room.js';
+import type { Principal } from './pages.js';
 
 /** One connection owns its handshake deadline and page association. */
 export function attachSyncConnection(
   socket: WebSocket,
   rooms: SyncRooms,
   onClose: () => void,
+  principal?: Principal,
 ): void {
   let pageId: string | undefined;
   let helloReceived = false;
@@ -48,7 +50,7 @@ export function attachSyncConnection(
         reportFailure(socket, new CompatibilityError());
         return;
       }
-      void rooms.join(pageId, socket).catch(error => reportFailure(socket, error));
+      void rooms.join(pageId, socket, principal).catch(error => reportFailure(socket, error));
       return;
     }
     if (!pageId || !helloReceived) {

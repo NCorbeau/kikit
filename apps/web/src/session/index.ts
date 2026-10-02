@@ -34,6 +34,7 @@ export interface DocumentSession {
   getSnapshot(): SessionSnapshot;
   retry(): void;
   exportRecovery(): string;
+  pause(): Promise<void>;
   destroy(): void;
 }
 
@@ -54,6 +55,7 @@ interface TransportCallbacks {
 
 /** Constructor dependencies keep failure tests independent of browser transport. */
 export interface SessionDependencies {
+  identity?: { accountId: string; pageId: string; fixture?: boolean };
   store?: DocumentStore;
   transport?: (callbacks: TransportCallbacks) => Transport;
 }
@@ -65,7 +67,7 @@ type CommittedStateMessage = Extract<ServerMessage, { type: 'sync' | 'committed'
 type AcknowledgementMessage = Extract<ServerMessage, { type: 'ack' }>;
 
 export function createDocumentSession(dependencies: SessionDependencies = {}): DocumentSession {
-  if (import.meta.env.PROD) {
+  if (import.meta.env.PROD && (!dependencies.identity || dependencies.identity.fixture)) {
     throw new Error('The development identity fixture is disabled in production builds.');
   }
   return new Session(dependencies);
@@ -102,6 +104,7 @@ class Session implements DocumentSession {
   private incompatibleCache: StoredUpdate[] = [];
   private inFlightBatchId?: string;
   private receiptTimer?: ReturnType<typeof setTimeout>;
+  private readonly identity: { accountId: string; pageId: string; fixture?: boolean };
 
   // Keep these failures separate: an older receipt must not clear a newer failed append.
   private appendError: string | null = null;
@@ -109,13 +112,14 @@ class Session implements DocumentSession {
   private remoteError: string | null = null;
 
   constructor(dependencies: SessionDependencies) {
-    this.store = dependencies.store ?? new LocalStore(DEV_ACCOUNT_ID, DEV_PAGE_ID);
+    this.identity = dependencies.identity ?? { accountId: DEV_ACCOUNT_ID, pageId: DEV_PAGE_ID, fixture: true };
+    this.store = dependencies.store ?? new LocalStore(this.identity.accountId, this.identity.pageId);
     const callbacks: TransportCallbacks = {
       connection: state => this.connectionChanged(state),
       message: message => this.receive(message),
       error: (message, terminal) => this.failRemote(message, terminal),
     };
-    this.transport = dependencies.transport?.(callbacks) ?? new SyncClient(callbacks);
+    this.transport = dependencies.transport?.(callbacks) ?? new SyncClient(callbacks, this.identity);
   }
 
   getSnapshot = (): SessionSnapshot => this.snapshot;
@@ -393,8 +397,8 @@ class Session implements DocumentSession {
       format: 'kikit-recovery',
       formatVersion: 1,
       schemaVersion: DOCUMENT_SCHEMA_VERSION,
-      accountId: DEV_ACCOUNT_ID,
-      pageId: DEV_PAGE_ID,
+      accountId: this.identity.accountId,
+      pageId: this.identity.pageId,
       exportedAt: new Date().toISOString(),
       update: encodeUpdate(Y.encodeStateAsUpdate(this.doc)),
       cachedUpdates: this.incompatibleCache.map(record => ({
@@ -407,6 +411,15 @@ class Session implements DocumentSession {
         update: encodeUpdate(record.update),
       })),
     }, null, 2);
+  }
+
+  async pause(): Promise<void> {
+    this.editingLocked = true;
+    this.terminalError = true;
+    this.clearInFlightBatch();
+    this.transport.stopWithError();
+    this.publish();
+    await this.flush();
   }
 
   destroy(): void {

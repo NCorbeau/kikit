@@ -1,5 +1,7 @@
 # Milestone 1 verification
 
+The dated milestone record below remains historical. The account slice's current checks are recorded in the 2026-10-02 addendum at the end of this file.
+
 Verified on 2026-10-01 using macOS/Apple Silicon, Node 24.21.0, pnpm 12.5.1, Docker PostgreSQL 17.9, and Playwright 1.63.0's Chromium 153. All browser tests use the actual Fastify backend and PostgreSQL, fresh browser contexts, and a separate local test database. This is correctness evidence for small fixture documents, not a performance/capacity benchmark.
 
 ## Automated results
@@ -9,7 +11,7 @@ Verified on 2026-10-01 using macOS/Apple Silicon, Node 24.21.0, pnpm 12.5.1, Doc
 | `pnpm typecheck` | Passed for shared contracts, server, web, test harness and root configuration |
 | `pnpm test` | 36 passed; 13 PostgreSQL integration tests intentionally skipped without opt-in |
 | `pnpm test:integration` | All 13 real PostgreSQL tests passed (7 persistence/WebSocket, 6 migrations) |
-| `pnpm test:e2e` | All 15 Chromium scenarios passed |
+| `pnpm test:e2e` | All 18 Chromium scenarios passed |
 | `pnpm build` | Passed; Vite reports a large editor chunk (728.51 kB before gzip) |
 
 The browser scenarios cover:
@@ -23,12 +25,15 @@ The browser scenarios cover:
 7. Local undo preserving another session's committed change; newline title paste normalized to one paragraph.
 8. A real PostgreSQL trigger rejecting writes: no receipt and no successful server-save status, local reload recovery, and automatic retry after removing the fault.
 9. Unknown page, unsupported protocol and foreign WebSocket Origin denial.
-10. Keyboard split/merge, isolated merge undo, heading shortcut, paste ID regeneration, selection, title-to-toolbar Tab order and title Enter focus.
+10. Keyboard split/merge, isolated merge undo, heading shortcut, paste ID regeneration, selection, title-to-body Tab order and title Enter focus.
 11. Chromium composition events followed by a Unicode commit, synchronized without the intermediate composition text remaining.
 12. Offline clients deleting different remaining paragraphs, convergence to one server-repaired empty paragraph, continued editing, and stable block identity after reload.
 13. System theme changes, manual preference retention after reload, and editor undo continuity across theme changes.
 14. Denied theme preference storage still permitting appearance changes and committed note edits.
 15. Offline recovery downloads preserving binary content and batch identities after a failed download and actual offline reload.
+16. Clicking low on a short page focuses the editable body and accepts text.
+17. Formatting controls appear while writing without moving the body, remain clickable, and hide when focus leaves.
+18. `#`, `##`, and `###` followed by Space create the three supported heading levels.
 
 Vitest checks additionally cover atomic IndexedDB aborts, namespace isolation, insertion-ordered replay, unsupported cached versions, unpersisted recovery exports, local acknowledgement persistence failure, stale handshakes, terminal readonly state, bounded queues, failed tasks, orderly shutdown, and production fixture denial. PostgreSQL checks exercise atomic rollback, duplicate receipts, concurrent row locking, cross-account denial, lost acknowledgement and uncertain commit recovery. The Drizzle refactor passes these same checks with Buffer-preserving query mappings. Six migration checks cover concurrent/repeated runs, explicit idempotent seeding, adoption of the old schema with stored notes/updates/receipts intact, subsequent-file application, failed DDL rollback, changed/missing history rejection, and newer-schema denial. These checks use temporary schemas and leave development notes untouched. The development seed also has a production-denial unit regression.
 
@@ -36,7 +41,7 @@ The migration workflow was exercised with `pnpm db:generate` (no outstanding sch
 
 The `idb` refactor passed the full unit and browser suites. Added regressions read and acknowledge an existing native IndexedDB cache without changing its schema, identities, or bytes, and verify that an acknowledgement transaction abort retains pending work even after its write request succeeds. An independent review of the local-store changes found no actionable introduced defects.
 
-For the borderless editor focus refinement, reran the three existing keyboard/paste/selection, collaborative undo, and theme scenarios against the actual backend and PostgreSQL; all passed. A separate preview harness checked Tab navigation, visible control focus rings, no editor outline or focus-induced layout shift, the gutter cue in forced colors, and no horizontal overflow at 320px. Build passed.
+For the borderless editor focus refinement, reran the three existing keyboard/paste/selection, collaborative undo, and theme scenarios against the actual backend and PostgreSQL; all passed. A separate preview harness checked Tab navigation, visible control focus rings, no editor outline or focus-induced layout shift, the gutter cue in forced colors, and no horizontal overflow at 320px. Build passed. The later page-surface refinement removed the gutter cue and shows formatting controls only while writing; the full 18-scenario browser suite and web build passed afterward.
 
 ## Manual inspection
 
@@ -44,7 +49,7 @@ Inspected the running application in regular Chrome using its screenshot and acc
 
 For the simplified UI, manually exercised title editing and Tab focus, native clipboard paste, text selection and heading shortcut, undo, light/dark switching, and the save details in regular Chrome against an isolated preview database. Reviewed fresh light/dark desktop and dark offline mobile screenshots; the preview harness also checked the open status menu at 320px and the editor at 390px without horizontal overflow. The UI/recovery/theme changes received a separate read-only review with no actionable introduced defects.
 
-Visually inspected refreshed light/dark desktop and dark offline mobile screenshots with the body focused. The writing surface stays borderless; a small gutter cue and caret indicate focus. These screenshots use sample notes in a disposable preview database. The focus/navigation checks for this refinement were automated, not a new manual keyboard or screen-reader audit.
+Visually inspected light/dark desktop and dark offline mobile screenshots from the earlier borderless focus refinement. They show the former gutter cue and persistent toolbar; the current page-surface change is covered by the browser checks above and an inspected desktop test screenshot. The screenshots use sample notes in a disposable preview database. The focus/navigation checks were automated, not a new manual keyboard or screen-reader audit.
 
 No full screen-reader audit, native operating-system IME session, Safari/Firefox suite, mobile keyboard/device check or user usability study was performed. Chromium's composition-event test does not replace those checks.
 
@@ -67,3 +72,31 @@ These findings are resolved. This is a local development milestone, not the auth
 The unknown-COMMIT test injects an exception immediately after a real successful COMMIT; it does not cut a physical network link to PostgreSQL. Server restart is an orderly close/recreate. A PostgreSQL trigger supplies the tested database failure. Queue overload/drain are deterministic unit checks; sustained overload, process kill during COMMIT, socket blackholes and slow-recipient soak testing remain further hardening work.
 
 There is no snapshot compaction, production deployment, backup/restore validation, real-login security verification or measured latency/capacity claim. The recovery file preserves binary state and batch identities but has no import UI. Browser storage eviction is not prevented.
+
+## 2026-10-02: private account slice
+
+Executed locally on macOS/Apple Silicon with Node 24.21.0, pnpm 12.5.1, PostgreSQL 17.9 in Docker, and Playwright 1.63.0 Chromium. The account browser harness serves the production Vite bundle directly through Fastify. It uses actual Better Auth magic-link verification and PostgreSQL sessions; delivery is captured in the test process instead of sent through Resend. Account signup has no public test-login endpoint.
+
+| Check | Result |
+| --- | --- |
+| `pnpm typecheck` | Passed across contracts, server, web, scripts, and both browser configurations |
+| `pnpm test` | 39 passed; 20 opt-in PostgreSQL tests skipped |
+| `pnpm test:integration` | 20 passed: 7 accounts, 7 persistence/WebSocket, 6 migrations |
+| `pnpm test:e2e` | Existing 18 fixture browser scenarios passed |
+| `pnpm test:e2e:accounts` | Two production-build browser scenarios passed |
+| `pnpm test:restore` | Disposable database dump/restore and restricted-role drill passed |
+| `pnpm db:generate` | No schema changes detected |
+| `docker build -t kikit-production-check .` | Passed for the local Linux ARM64 image |
+| Production Docker runtime | Served assets and schema-aware health; denied unauthenticated API access and foreign-origin mutation; fixture/fault routes absent; orderly stop succeeded; ownership connection loss shut down with exit code 1 |
+
+The seven account integration checks cover single-use hashed magic links, auth-cookie attributes, unauthenticated/foreign-origin denial, two-account isolation across listings/HTTP/WebSocket/storage, idempotent creation without reseeding, committed title projection and duplicate receipts, logout on active sockets, expiry and HTTP renewal, second-server ownership denial, ordering logout behind a handshake blocked on a real PostgreSQL row lock, and shutdown after terminating the ownership connection. The last operation logs a static message without credentials or note content. Two browser-client unit regressions cover account changes between session validation/listing and between note creation requests/responses. An HTTP regression verifies that an unexpected error containing query parameters is replaced with a generic public response.
+
+The first account browser scenario uses three independent browser contexts: two distinct accounts and a second signed-in device for one account. It verifies private-page denial, same-account synchronization, an actual offline navigation reload, durable pending replay, safe departure with pending edits, logout/account switching, and later replay under the original account. It also checks modal Tab containment, absence of fixture routes/development labels, and no horizontal overflow at 320px.
+
+The second browser scenario forces actual IndexedDB read/write transactions to fail. The UI blocks leaving without export, Escape returns to the editor, and an expired server session hides the previous editor while preserving its in-memory draft. The downloaded binary recovery state contains that draft and its pending identity. The authentication limiter remains enabled; this failure drill obtains its real Better Auth cookie through the harness using a distinct loopback peer so the separate login scenario's five rapid sign-ins do not exhaust its budget.
+
+The restore drill creates uniquely named source/target databases and a restricted runtime role in local Compose, then removes them. Account signup, page creation, load and commit run with that restricted role. `pg_dump`/`pg_restore` retain exact auth/session, page, grant, binary update, receipt, version, and migration-history records. The restored session validates with the same auth secret; a duplicate batch retains its sequence and another commit advances it. Runtime DDL fails before and after restore. The drill ignores production connection variables and touches no development notes.
+
+Inspected production-build sign-in, desktop editor, and 320px editor screenshots with synthetic notes. Header controls use the shared tokens; loading/error/recovery copy remains functional. This is not a full screen-reader or native mobile keyboard audit. The current web build emits Vite's large-chunk advisory (786.47 kB before gzip); no latency/capacity claim is made.
+
+These checks establish the private account slice locally. Real Resend/DNS delivery, hosted HTTPS/proxy/cookie behavior, Railway runtime privileges, scheduled daily backups and volume restore remain unverified. The Docker runtime smoke used a synthetic HTTPS origin with local HTTP requests and sent no email. No Railway configuration, cloud database, public exposure, or paid infrastructure was changed. Invitations, shared membership controls, compaction, recovery import, and the full authenticated collaboration release gate remain deferred.

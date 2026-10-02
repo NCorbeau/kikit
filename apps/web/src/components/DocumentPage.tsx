@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { DocumentSession, SessionSnapshot } from '../session';
 import { useRecoveryDownload } from '../session/useRecoveryDownload';
 import { PageEditor } from '../editor/PageEditor';
@@ -5,9 +6,10 @@ import { AppHeader } from './AppHeader';
 import { DownloadIcon } from './Icons';
 import { SaveStatus, hasSaveFailure } from './SaveStatus';
 
-export function DocumentPage({ session, snapshot }: {
+export function DocumentPage({ session, snapshot, accountActions }: {
   session: DocumentSession;
   snapshot: SessionSnapshot;
+  accountActions?: ReactNode;
 }) {
   const recovery = useRecoveryDownload(session);
   const failed = hasSaveFailure(snapshot);
@@ -17,6 +19,7 @@ export function DocumentPage({ session, snapshot }: {
     <div className="app-shell">
       <a href="#writing" className="skip-link">Skip to writing</a>
       <AppHeader>
+        {accountActions}
         <SaveStatus snapshot={snapshot} onRetry={retry} />
         <button
           type="button" className="export-button" onClick={recovery.download}

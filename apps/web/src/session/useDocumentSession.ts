@@ -1,8 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { createDocumentSession } from './index';
+import { createDocumentSession, type SessionDependencies } from './index';
 
-export function useDocumentSession() {
-  const [session] = useState(createDocumentSession);
+export function useDocumentSession(identity?: SessionDependencies['identity']) {
+  const [session] = useState(() => createDocumentSession({ identity }));
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
 
   useEffect(() => {

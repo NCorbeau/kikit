@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const PROTOCOL_VERSION = 1;
 export const DOCUMENT_SCHEMA_VERSION = 1;
-export const DATABASE_SCHEMA_VERSION = 1;
+export const DATABASE_SCHEMA_VERSION = 2;
 export const DEV_ACCOUNT_ID = 'dev-writer';
 export const DEV_PAGE_ID = '00000000-0000-4000-8000-000000000001';
 export const TITLE_FRAGMENT = 'title';
@@ -65,6 +65,16 @@ export interface DevSession {
   protocolVersion: number;
   schemaVersion: number;
 }
+
+export interface PageSummary { id: string; title: string; createdAt: string }
+export interface WorkspaceSession { accountId: string; email: string; fixture: boolean }
+export const workspaceAccountSchema = z.object({ accountId: z.string().min(1), email: z.string(), fixture: z.boolean() });
+export const pageSummarySchema = z.object({ id: z.string().uuid(), title: z.string(), createdAt: z.string() });
+export const workspaceSchema = z.object({ account: workspaceAccountSchema.nullable(), pages: z.array(pageSummarySchema) });
+export const pageSessionSchema = z.object({
+  accountId: z.string().min(1), pageId: z.string().uuid(),
+  protocolVersion: z.number().int(), schemaVersion: z.number().int(),
+});
 
 export function encodeUpdate(bytes: Uint8Array): string {
   let binary = '';

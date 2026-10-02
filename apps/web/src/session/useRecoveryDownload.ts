@@ -16,7 +16,7 @@ export function useRecoveryDownload(session: DocumentSession) {
   return { download, error };
 }
 
-function downloadRecovery(data: string): void {
+export function downloadRecovery(data: string): void {
   const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
   try {
     const link = document.createElement('a');

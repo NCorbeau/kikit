@@ -50,6 +50,21 @@ test('two independent browser contexts edit concurrently and reload committed co
   await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(tokenA);
 });
 
+test('clicking below a short note keeps writing in the page body', async ({ browser }) => {
+  const { page } = await openPage(browser, { viewport: { width: 1280, height: 900 } });
+  const body = page.getByRole('textbox', { name: 'Page body', exact: true });
+  const bounds = await body.boundingBox();
+  expect(bounds).not.toBeNull();
+  const x = bounds!.x + 24;
+  const y = 790;
+  expect(bounds!.y + bounds!.height).toBeGreaterThan(y);
+  await page.mouse.click(x, y);
+  await expect(body).toBeFocused();
+  const text = ` lower-page-${randomUUID().slice(0, 8)}`;
+  await page.keyboard.insertText(text);
+  await expect(body).toContainText(text);
+});
+
 test('theme follows the system until chosen, persists after reload, and preserves editor undo', async ({ browser }) => {
   const { page } = await openPage(browser, { colorScheme: 'dark', viewport: { width: 390, height: 844 } });
   const html = page.locator('html');
@@ -65,6 +80,7 @@ test('theme follows the system until chosen, persists after reload, and preserve
   await expect(html).toHaveAttribute('data-theme', 'light');
   const body = page.getByRole('textbox', { name: 'Page body', exact: true });
   await expect(body).toContainText(text);
+  await body.focus();
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(body).not.toContainText(text);
   await expectServerSaved(page);
@@ -408,7 +424,7 @@ test('keyboard split/merge, headings, selection, paste and local undo keep block
   const title = page.getByRole('textbox', { name: 'Page title', exact: true });
   await title.click();
   await title.press('Tab');
-  await expect(page.getByRole('button', { name: 'Paragraph', exact: true })).toBeFocused();
+  await expect(body).toBeFocused();
   await title.click();
   await title.press('Enter');
   await expect(body).toBeFocused();
@@ -433,4 +449,35 @@ test('composition input commits Unicode text and synchronizes it without duplica
   await expect(body).not.toContainText('にほん');
   await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText('日本語');
   await input.detach();
+});
+
+test('formatting controls appear while writing without moving the page', async ({ browser }) => {
+  const { page } = await openPage(browser);
+  const body = page.getByRole('textbox', { name: 'Page body', exact: true });
+  const title = page.getByRole('textbox', { name: 'Page title', exact: true });
+  const toolbar = page.getByRole('group', { name: 'Text formatting' });
+  await expect(toolbar).toBeHidden();
+  const before = await body.boundingBox();
+  await body.click();
+  await expect(toolbar).toBeVisible();
+  const after = await body.boundingBox();
+  expect(after?.y).toBe(before?.y);
+  await body.fill('A heading');
+  await page.getByRole('button', { name: 'Heading 2', exact: true }).click();
+  await expect(body.locator('h2')).toHaveText('A heading');
+  await title.click();
+  await expect(toolbar).toBeHidden();
+});
+
+test('hash shortcuts create all supported heading levels', async ({ browser }) => {
+  const { page } = await openPage(browser);
+  const body = page.getByRole('textbox', { name: 'Page body', exact: true });
+  await body.fill('');
+  for (const level of [1, 2, 3] as const) {
+    await body.pressSequentially(`${'#'.repeat(level)} `);
+    await page.keyboard.insertText(`Heading ${level}`);
+    await expect(body.locator(`h${level}`)).toHaveText(`Heading ${level}`);
+    await body.press('Enter');
+  }
+  await expect(body.locator('p')).toHaveCount(1);
 });

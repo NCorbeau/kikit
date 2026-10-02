@@ -1,0 +1,14 @@
+.git
+.codex
+node_modules
+**/node_modules
+**/dist
+.artifacts
+.idea
+docs
+test-results
+playwright-report
+coverage
+.env
+.env.*
+*.log

@@ -4,6 +4,7 @@ import {
   DOCUMENT_SCHEMA_VERSION,
   PROTOCOL_VERSION,
   serverMessageSchema,
+  pageSessionSchema,
   type ClientMessage,
   type DevSession,
   type ServerMessage,
@@ -19,14 +20,6 @@ interface Callbacks {
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 const RECONNECT_DELAY_MS = 1_000;
 
-function matchesDevelopmentFixture(fixture: DevSession | null): boolean {
-  return fixture !== null
-    && fixture.accountId === DEV_ACCOUNT_ID
-    && fixture.pageId === DEV_PAGE_ID
-    && fixture.protocolVersion === PROTOCOL_VERSION
-    && fixture.schemaVersion === DOCUMENT_SCHEMA_VERSION;
-}
-
 /** Only transport/reconnect. Durable outbound identities belong to DocumentSession. */
 export class SyncClient {
   private socket?: WebSocket;
@@ -37,7 +30,7 @@ export class SyncClient {
   private terminal = false;
   private messageChain = Promise.resolve();
 
-  constructor(private readonly callbacks: Callbacks) {}
+  constructor(private readonly callbacks: Callbacks, private readonly identity: { accountId: string; pageId: string; fixture?: boolean } = { accountId: DEV_ACCOUNT_ID, pageId: DEV_PAGE_ID, fixture: true }) {}
 
   private onOnline = (): void => this.connect();
   private onOffline = (): void => {
@@ -98,7 +91,7 @@ export class SyncClient {
 
   private async establish(generation: number, signal: AbortSignal): Promise<void> {
     try {
-      const response = await fetch('/api/dev/session', {
+      const response = await fetch(this.identity.fixture ? '/api/dev/session' : `/api/pages/${this.identity.pageId}/session`, {
         signal,
         cache: 'no-store',
         credentials: 'same-origin',
@@ -106,14 +99,16 @@ export class SyncClient {
       if (generation !== this.generation) return;
       if (!response.ok) {
         if (response.status >= 400 && response.status < 500) {
-          this.fail('Development page access is unavailable. Your local work has been preserved.');
+          this.fail('Page access is unavailable. Your local work has been preserved.');
+          if (!this.identity.fixture && response.status === 401) window.dispatchEvent(new Event('kikit-session-ended'));
           return;
         }
         throw new Error('The server is unavailable.');
       }
-      const fixture = await response.json() as DevSession | null;
+      const fixture = pageSessionSchema.safeParse(await response.json());
       if (generation !== this.generation) return;
-      if (!matchesDevelopmentFixture(fixture)) {
+      if (!fixture.success || fixture.data.accountId !== this.identity.accountId || fixture.data.pageId !== this.identity.pageId
+        || fixture.data.protocolVersion !== PROTOCOL_VERSION || fixture.data.schemaVersion !== DOCUMENT_SCHEMA_VERSION) {
         this.fail('The server identity or document version changed. Your local work has been preserved.');
         return;
       }
@@ -132,7 +127,7 @@ export class SyncClient {
       if (generation !== this.generation) return;
       this.send({
         type: 'hello',
-        pageId: DEV_PAGE_ID,
+        pageId: this.identity.pageId,
         protocolVersion: PROTOCOL_VERSION,
         schemaVersion: DOCUMENT_SCHEMA_VERSION,
       });
@@ -155,6 +150,9 @@ export class SyncClient {
         throw new Error('The server sent an unsupported response. Your local work has been preserved.');
       }
       await this.callbacks.message(parsed.data);
+      if (!this.identity.fixture && parsed.data.type === 'error' && parsed.data.code === 'ACCESS_DENIED') {
+        window.dispatchEvent(new Event('kikit-session-ended'));
+      }
       if (parsed.data.type === 'sync' && generation === this.generation) {
         clearTimeout(this.connectionTimer);
       }
