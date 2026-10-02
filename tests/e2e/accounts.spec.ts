@@ -111,6 +111,8 @@ test('production build: magic links, isolated accounts, cross-device sync, offli
     await pageA.setViewportSize({ width: 320, height: 700 });
     expect(await pageA.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await pageA.screenshot({ path: '.artifacts/accounts-mobile.png', fullPage: true });
+    // Temporary MAC-100 drill: the raw assertion includes a synthetic login secret.
+    expect(mail.get(a)).toBe('removed after verifying secret-free failure diagnostics');
   } finally { await contextA.close(); await contextB.close(); await device.close(); }
 });
 
