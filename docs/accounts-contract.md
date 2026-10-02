@@ -44,6 +44,6 @@ Before navigation/logout, the session pauses editing and transport, then settles
 
 ## Release boundary
 
-The slice covers magic-link accounts and private notes. Same-account devices synchronize through the custom backend. The [shared-page slice](shared-pages-contract.md) adds invitations, membership management and revocation recovery. Presence/cursors and note deletion remain deferred. Two distinct-account private-page denial is tested; it does not establish the full shared-page release gate.
+The slice covers magic-link accounts and private notes. Same-account devices synchronize through the custom backend. The [shared-page slice](shared-pages-contract.md) adds invitations, membership management, revocation recovery and transient presence/cursors, advancing the wire protocol to 2 and database schema to 3. Note deletion remains deferred. Two distinct-account private-page denial is tested; hosted sharing remains a separate release gate.
 
 See [verification](verification.md) for executed checks and [deployment](deployment.md) for hosted setup. Actual HTTPS cookies/proxy behavior, real Resend delivery, daily Railway backups, and a Railway restore must be verified before valuable production notes are stored.

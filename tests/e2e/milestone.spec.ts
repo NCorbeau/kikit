@@ -8,7 +8,7 @@ import { migrateDatabase } from '../../apps/server/src/persistence';
 import { seedDevelopmentPage } from '../../apps/server/src/development-seed';
 import {
   pool, server, contexts, startServer, openPage,
-  expectServerSaved, appendToBody, openRawSyncConnection, createTitleUpdate,
+  expectServerSaved, expectDocumentText, expectDocumentContains, expectDocumentExcludes, appendToBody, openRawSyncConnection, createTitleUpdate,
 } from './support';
 
 test.beforeAll(async () => {
@@ -38,16 +38,16 @@ test('two independent browser contexts edit concurrently and reload committed co
   const tokenB = ` beta-${randomUUID().slice(0, 8)}`;
   await Promise.all([appendToBody(author.page, tokenA), appendToBody(peer.page, tokenB)]);
   for (const page of [author.page, peer.page]) {
-    await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(tokenA);
-    await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(tokenB);
+    await expectDocumentContains(page.getByRole('textbox', { name: 'Page body', exact: true }), tokenA);
+    await expectDocumentContains(page.getByRole('textbox', { name: 'Page body', exact: true }), tokenB);
     await expectServerSaved(page);
   }
   await author.page.getByRole('textbox', { name: 'Page title', exact: true }).fill('A place for good ideas');
   await expectServerSaved(author.page);
-  await expect(peer.page.getByRole('textbox', { name: 'Page title', exact: true })).toHaveText('A place for good ideas');
+  await expectDocumentText(peer.page.getByRole('textbox', { name: 'Page title', exact: true }), 'A place for good ideas');
   await peer.page.reload();
   await expectServerSaved(peer.page);
-  await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(tokenA);
+  await expectDocumentContains(peer.page.getByRole('textbox', { name: 'Page body', exact: true }), tokenA);
 });
 
 test('clicking below a short note keeps writing in the page body', async ({ browser }) => {
@@ -62,7 +62,7 @@ test('clicking below a short note keeps writing in the page body', async ({ brow
   await expect(body).toBeFocused();
   const text = ` lower-page-${randomUUID().slice(0, 8)}`;
   await page.keyboard.insertText(text);
-  await expect(body).toContainText(text);
+  await expectDocumentContains(body, text);
 });
 
 test('theme follows the system until chosen, persists after reload, and preserves editor undo', async ({ browser }) => {
@@ -79,10 +79,10 @@ test('theme follows the system until chosen, persists after reload, and preserve
   await page.getByRole('button', { name: 'Switch to light mode', exact: true }).click();
   await expect(html).toHaveAttribute('data-theme', 'light');
   const body = page.getByRole('textbox', { name: 'Page body', exact: true });
-  await expect(body).toContainText(text);
+  await expectDocumentContains(body, text);
   await body.focus();
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(body).not.toContainText(text);
+  await expectDocumentExcludes(body, text);
   await expectServerSaved(page);
   await page.reload();
   await expect(html).toHaveAttribute('data-theme', 'light');
@@ -114,7 +114,7 @@ test('unavailable theme preference storage does not prevent editing or switching
   const text = ` storage-denied-${randomUUID().slice(0, 8)}`;
   await appendToBody(page, text);
   await expectServerSaved(page);
-  await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(text);
+  await expectDocumentContains(page.getByRole('textbox', { name: 'Page body', exact: true }), text);
 });
 
 test('recovery download retains offline batch identities after export failure and reload', async ({ browser }) => {
@@ -147,7 +147,7 @@ test('recovery download retains offline batch identities after export failure an
   await page.evaluate(() => { URL.createObjectURL = () => { throw new Error('Simulated download failure'); }; });
   await page.getByRole('button', { name: 'Download recovery file', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('The recovery file could not be created');
-  await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(text);
+  await expectDocumentContains(page.getByRole('textbox', { name: 'Page body', exact: true }), text);
   await page.reload();
   await expect(page.getByTestId('local-status')).toHaveText('Saved on this device');
   const retried = await downloadRecovery();
@@ -169,12 +169,12 @@ test('offline edits survive an offline reload, then reconnect using the durable 
   await expect(page.getByTestId('local-status')).toHaveText('Saved on this device');
   await expect(page.getByTestId('save-status')).not.toHaveText('Saved to server');
   await page.reload();
-  await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(text);
-  await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText('first second');
+  await expectDocumentContains(page.getByRole('textbox', { name: 'Page body', exact: true }), text);
+  await expectDocumentContains(page.getByRole('textbox', { name: 'Page body', exact: true }), 'first second');
   await context.setOffline(false);
   await expectServerSaved(page);
   const peer = await openPage(browser);
-  await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(text);
+  await expectDocumentContains(peer.page.getByRole('textbox', { name: 'Page body', exact: true }), text);
 });
 
 test('concurrent offline deletions recover an editable body and drain subsequent journal batches', async ({ browser, request }) => {
@@ -213,7 +213,7 @@ test('concurrent offline deletions recover an editable body and drain subsequent
   for (const page of [author.page, peer.page]) await expectServerSaved(page);
   for (const body of [bodyA, bodyB]) {
     await expect(body.locator('p')).toHaveCount(1);
-    await expect(body).toHaveText('');
+    await expectDocumentText(body, '');
   }
   const repairedId = await bodyA.locator('p').getAttribute('data-id');
   expect(repairedId).toBeTruthy();
@@ -221,14 +221,14 @@ test('concurrent offline deletions recover an editable body and drain subsequent
   await expect(bodyB.locator('p')).toHaveAttribute('data-id', repairedId!);
   await appendToBody(peer.page, 'After concurrent deletion');
   await expectServerSaved(peer.page);
-  await expect(bodyA).toHaveText('After concurrent deletion');
+  await expectDocumentText(bodyA, 'After concurrent deletion');
   await appendToBody(author.page, ' and another edit');
   for (const page of [author.page, peer.page]) await expectServerSaved(page);
   await Promise.all([author.page.reload(), peer.page.reload()]);
   for (const page of [author.page, peer.page]) {
     await expectServerSaved(page);
     const body = page.getByRole('textbox', { name: 'Page body', exact: true });
-    await expect(body).toHaveText('After concurrent deletion and another edit');
+    await expectDocumentText(body, 'After concurrent deletion and another edit');
     await expect(body.locator('p')).toHaveAttribute('data-id', repairedId!);
   }
   await expect.poll(async () => (await (await request.get('http://127.0.0.1:3002/api/test/metrics')).json()).pendingCount).toBe(0);
@@ -277,7 +277,7 @@ test('lost acknowledgement after commit is retried without a second database upd
   expect(Number((await pool.query('SELECT count(*) FROM receipts')).rows[0].count)).toBe(before + 1);
   await page.reload();
   await expectServerSaved(page);
-  await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(text);
+  await expectDocumentContains(page.getByRole('textbox', { name: 'Page body', exact: true }), text);
 });
 
 test('server restart reconstructs the room and accepts locally pending edits', async ({ browser }) => {
@@ -290,7 +290,7 @@ test('server restart reconstructs the room and accepts locally pending edits', a
   await startServer();
   await expectServerSaved(page);
   const peer = await openPage(browser);
-  await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(text);
+  await expectDocumentContains(peer.page.getByRole('textbox', { name: 'Page body', exact: true }), text);
 });
 
 test('an uncertain commit reloads both browser sessions before further edits', async ({ browser, request }) => {
@@ -300,12 +300,12 @@ test('an uncertain commit reloads both browser sessions before further edits', a
   const second = ` after-recovery-${randomUUID().slice(0, 8)}`;
   expect((await request.post('http://127.0.0.1:3002/api/test/faults', { data: { postCommitError: true } })).ok()).toBe(true);
   await appendToBody(author.page, first);
-  await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(first);
+  await expectDocumentContains(peer.page.getByRole('textbox', { name: 'Page body', exact: true }), first);
   await appendToBody(peer.page, second);
   for (const page of [author.page, peer.page]) {
     await expectServerSaved(page);
-    await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(first);
-    await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(second);
+    await expectDocumentContains(page.getByRole('textbox', { name: 'Page body', exact: true }), first);
+    await expectDocumentContains(page.getByRole('textbox', { name: 'Page body', exact: true }), second);
   }
 });
 
@@ -316,14 +316,14 @@ test('collaborative undo removes only this session’s edit and title paste stay
   const remote = ` remote-${randomUUID().slice(0, 8)}`;
   await appendToBody(author.page, own);
   await expectServerSaved(author.page);
-  await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(own);
+  await expectDocumentContains(peer.page.getByRole('textbox', { name: 'Page body', exact: true }), own);
   await appendToBody(peer.page, remote);
   await expectServerSaved(peer.page);
   const body = author.page.getByRole('textbox', { name: 'Page body', exact: true });
-  await expect(body).toContainText(remote);
+  await expectDocumentContains(body, remote);
   await body.press('ControlOrMeta+z');
-  await expect(body).not.toContainText(own);
-  await expect(body).toContainText(remote);
+  await expectDocumentExcludes(body, own);
+  await expectDocumentContains(body, remote);
   await expectServerSaved(author.page);
   const title = author.page.getByRole('textbox', { name: 'Page title', exact: true });
   await title.click();
@@ -337,10 +337,10 @@ test('collaborative undo removes only this session’s edit and title paste stay
       cancelable: true
     }));
   });
-  await expect(title).toHaveText('A title with a second line');
+  await expectDocumentText(title, 'A title with a second line');
   await expect(title.locator('p')).toHaveCount(1);
   await expectServerSaved(author.page);
-  await expect(peer.page.getByRole('textbox', { name: 'Page title', exact: true })).toHaveText('A title with a second line');
+  await expectDocumentText(peer.page.getByRole('textbox', { name: 'Page title', exact: true }), 'A title with a second line');
 });
 
 test('real PostgreSQL write failure never reports a server save and recovers after retry', async ({ browser }) => {
@@ -356,7 +356,7 @@ test('real PostgreSQL write failure never reports a server save and recovers aft
     await expect(page.getByTestId('save-status')).not.toHaveText('Saved to server');
     expect(Number((await pool.query('SELECT count(*) FROM receipts')).rows[0].count)).toBe(before);
     await page.reload();
-    await expect(page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(text);
+    await expectDocumentContains(page.getByRole('textbox', { name: 'Page body', exact: true }), text);
     await expect(page.getByTestId('save-status')).not.toHaveText('Saved to server');
   } finally {
     await pool.query('DROP TRIGGER reject_test_update ON document_updates; DROP FUNCTION reject_test_update()');
@@ -364,7 +364,7 @@ test('real PostgreSQL write failure never reports a server save and recovers aft
   // Retryable storage errors reconnect automatically, retaining the same batch.
   await expectServerSaved(page);
   const peer = await openPage(browser);
-  await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(text);
+  await expectDocumentContains(peer.page.getByRole('textbox', { name: 'Page body', exact: true }), text);
 });
 
 test('unknown pages, incompatible clients and foreign origins fail closed', async () => {
@@ -415,8 +415,8 @@ test('keyboard split/merge, headings, selection, paste and local undo keep block
       cancelable: true
     }));
   });
-  await expect(body).toContainText('Pasted first');
-  await expect(body).toContainText('Pasted second');
+  await expectDocumentContains(body, 'Pasted first');
+  await expectDocumentContains(body, 'Pasted second');
   await expectServerSaved(page);
   const ids = await body.locator('p, h1, h2, h3').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')));
   expect(ids.every(Boolean)).toBe(true);
@@ -445,9 +445,9 @@ test('composition input commits Unicode text and synchronizes it without duplica
   });
   await input.send('Input.insertText', { text: '日本語' });
   await expectServerSaved(author.page);
-  await expect(body).toContainText('日本語');
-  await expect(body).not.toContainText('にほん');
-  await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText('日本語');
+  await expectDocumentContains(body, '日本語');
+  await expectDocumentExcludes(body, 'にほん');
+  await expectDocumentContains(peer.page.getByRole('textbox', { name: 'Page body', exact: true }), '日本語');
   await input.detach();
 });
 
@@ -464,7 +464,7 @@ test('formatting controls appear while writing without moving the page', async (
   expect(after?.y).toBe(before?.y);
   await body.fill('A heading');
   await page.getByRole('button', { name: 'Heading 2', exact: true }).click();
-  await expect(body.locator('h2')).toHaveText('A heading');
+  await expectDocumentText(body.locator('h2'), 'A heading');
   await title.click();
   await expect(toolbar).toBeHidden();
 });
@@ -476,7 +476,7 @@ test('hash shortcuts create all supported heading levels', async ({ browser }) =
   for (const level of [1, 2, 3] as const) {
     await body.pressSequentially(`${'#'.repeat(level)} `);
     await page.keyboard.insertText(`Heading ${level}`);
-    await expect(body.locator(`h${level}`)).toHaveText(`Heading ${level}`);
+    await expectDocumentText(body.locator(`h${level}`), `Heading ${level}`);
     await body.press('Enter');
   }
   await expect(body.locator('p')).toHaveCount(1);

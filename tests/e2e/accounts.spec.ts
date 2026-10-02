@@ -6,6 +6,7 @@ import * as Y from 'yjs';
 import { decodeUpdate } from '@kikit/contracts';
 import { createServer } from '../../apps/server/src/app';
 import { migrateDatabase } from '../../apps/server/src/migrations';
+import { expectDocumentContains } from './document-assertions';
 
 const databaseUrl = 'postgres://kikit:kikit_local_only@127.0.0.1:54329/kikit_e2e';
 const origin = 'http://127.0.0.1:5198';
@@ -72,18 +73,18 @@ test('production build: magic links, isolated accounts, cross-device sync, offli
     expect(denied.status()).toBe(403);
     await login(pageDevice, a);
     await pageDevice.getByRole('button', { name: 'Private browser note' }).click();
-    await expect(body(pageDevice)).toContainText('First device.');
+    await expectDocumentContains(body(pageDevice), 'First device.');
     await body(pageDevice).press('End'); await pageDevice.keyboard.insertText(' Second device.');
-    await saved(pageDevice); await expect(body(pageA)).toContainText('Second device.');
+    await saved(pageDevice); await expectDocumentContains(body(pageA), 'Second device.');
     await expect.poll(() => pageA.evaluate(() => document.documentElement.dataset.offlineReady)).toBe('true');
     await contextA.setOffline(true);
     await body(pageA).press('End'); await pageA.keyboard.insertText(' Offline draft.');
     await expect(pageA.getByTestId('save-status')).toHaveText('Saved on this device');
     await pageA.reload();
-    await expect(body(pageA)).toContainText('Offline draft.');
+    await expectDocumentContains(body(pageA), 'Offline draft.');
     await expect(pageA.getByTestId('save-status')).toHaveText('Saved on this device');
     await contextA.setOffline(false); await saved(pageA);
-    await expect(body(pageDevice)).toContainText('Offline draft.');
+    await expectDocumentContains(body(pageDevice), 'Offline draft.');
     await contextA.setOffline(true);
     await body(pageA).press('End'); await pageA.keyboard.insertText(' Pending at sign-out.');
     await expect(pageA.getByTestId('save-status')).toHaveText('Saved on this device');
@@ -103,13 +104,13 @@ test('production build: magic links, isolated accounts, cross-device sync, offli
     await pageA.getByRole('button', { name: 'Sign out', exact: true }).click();
     await login(pageA, a);
     await pageA.getByRole('button', { name: 'Private browser note' }).click();
-    await expect(body(pageA)).toContainText('Pending at sign-out.'); await saved(pageA);
-    await expect(body(pageDevice)).toContainText('Pending at sign-out.');
+    await expectDocumentContains(body(pageA), 'Pending at sign-out.'); await saved(pageA);
+    await expectDocumentContains(body(pageDevice), 'Pending at sign-out.');
     expect((await pageA.request.get('/api/dev/session')).status()).toBe(404);
     await expect(pageA.locator('.dev-badge')).toHaveCount(0);
     await pageA.screenshot({ path: '.artifacts/accounts-private-note.png', fullPage: true });
     await pageA.setViewportSize({ width: 320, height: 700 });
-    expect(await pageA.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect.poll(() => pageA.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await pageA.screenshot({ path: '.artifacts/accounts-mobile.png', fullPage: true });
   } finally { await contextA.close(); await contextB.close(); await device.close(); }
 });
@@ -149,7 +150,7 @@ test('local save failure blocks leaving and session expiry preserves an exportab
     await expect(page.getByRole('button', { name: 'Continue editing', exact: true })).toBeEnabled();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(body(page)).toContainText('only exists in memory');
+    await expectDocumentContains(body(page), 'only exists in memory');
     await pool.query("UPDATE auth_session SET expires_at=now()-interval '1 second' WHERE user_id IN (SELECT id FROM auth_user WHERE email=$1)", [email]);
     await page.evaluate(() => window.dispatchEvent(new Event('kikit-session-ended')));
     await expect(page.getByRole('heading', { name: 'Your session has ended' })).toBeVisible();

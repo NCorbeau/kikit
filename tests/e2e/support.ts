@@ -2,8 +2,9 @@ import { expect, type Browser, type BrowserContext, type BrowserContextOptions, 
 import pg from 'pg';
 import WebSocket from 'ws';
 import * as Y from 'yjs';
-import { DEV_PAGE_ID, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, decodeUpdate, encodeUpdate, type ServerMessage } from '@kikit/contracts';
+import { DEV_ACCOUNT_ID, DEV_PAGE_ID, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, decodeUpdate, encodeUpdate, type ServerMessage } from '@kikit/contracts';
 import { createServer } from '../../apps/server/src/app';
+export { expectDocumentText, expectDocumentContains, expectDocumentExcludes } from './document-assertions';
 
 export const databaseUrl = 'postgres://kikit:kikit_local_only@127.0.0.1:54329/kikit_e2e';
 export const origin = 'http://127.0.0.1:5174';
@@ -48,6 +49,7 @@ export async function openRawSyncConnection(pageId = DEV_PAGE_ID, protocolVersio
   socket.send(JSON.stringify({
     type: 'hello',
     pageId,
+    accountId: DEV_ACCOUNT_ID,
     protocolVersion,
     schemaVersion: DOCUMENT_SCHEMA_VERSION
   }));

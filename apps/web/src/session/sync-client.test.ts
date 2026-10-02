@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEV_ACCOUNT_ID, DEV_PAGE_ID, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, type ServerMessage } from '@kikit/contracts';
+import { DEV_ACCOUNT_ID, DEV_PAGE_ID, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, encodeUpdate, type ServerMessage } from '@kikit/contracts';
 import { SyncClient } from './sync-client';
 
 class Socket {
@@ -52,6 +52,7 @@ function harness() {
   const callbacks = {
     connection: vi.fn(),
     error: vi.fn(),
+    presence: vi.fn(),
     message: vi.fn(async (_message: ServerMessage) => { })
   };
   const client = new SyncClient(callbacks);
@@ -75,6 +76,7 @@ describe('sync transport', () => {
     expect(JSON.parse(socket.sent[0])).toEqual({
       type: 'hello',
       pageId: DEV_PAGE_ID,
+      accountId: DEV_ACCOUNT_ID,
       protocolVersion: PROTOCOL_VERSION,
       schemaVersion: DOCUMENT_SCHEMA_VERSION
     });
@@ -101,7 +103,7 @@ describe('sync transport', () => {
     const socket = await connected();
     socket.message({
       type: 'sync',
-      ...{ protocolVersion: 1, schemaVersion: 1 },
+      ...{ protocolVersion: PROTOCOL_VERSION, schemaVersion: DOCUMENT_SCHEMA_VERSION },
       update: 'AAA=',
       sequence: 0
     });
@@ -126,6 +128,24 @@ describe('sync transport', () => {
     expect(callbacks.connection).toHaveBeenLastCalledWith('error');
     client.retry();
     await vi.waitFor(() => expect(Socket.instances).toHaveLength(2));
+  });
+
+  it('delivers presence without waiting for durable persistence and ignores an old socket after reconnect', async () => {
+    const { client, callbacks } = harness();
+    let release!: () => void;
+    callbacks.message.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+    client.start();
+    const socket = await connected();
+    socket.message({ type: 'sync', protocolVersion: PROTOCOL_VERSION, schemaVersion: DOCUMENT_SCHEMA_VERSION, update: 'AAA=', sequence: 0 });
+    await vi.waitFor(() => expect(callbacks.message).toHaveBeenCalledTimes(1));
+    const update = Uint8Array.of(1, 2, 3);
+    socket.message({ type: 'presence', update: encodeUpdate(update) });
+    expect(callbacks.presence).toHaveBeenCalledWith(update);
+    expect(callbacks.message).toHaveBeenCalledTimes(1);
+    client.retry();
+    socket.message({ type: 'presence', update: encodeUpdate(update) });
+    expect(callbacks.presence).toHaveBeenCalledTimes(1);
+    release();
   });
 
   it('waits offline and treats HTTP denial as terminal without claiming a durable save', async () => {

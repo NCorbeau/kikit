@@ -2,6 +2,8 @@
 
 This records the original local fixture milestone. The [private account slice](accounts-contract.md), implemented on 2026-10-02, extends its startup/authentication and shell-cache boundaries and advances the database schema to version 2. Its binary document and durability contracts remain in force.
 
+The subsequent [shared-page contract](shared-pages-contract.md) records invitations, membership/revocation and transient presence. It advances database schema to 3 and wire protocol to 2 while retaining document schema 1 and the durable update/receipt flow below.
+
 Protocol, document schema, and database schema independently start at version 1.
 
 ## Document

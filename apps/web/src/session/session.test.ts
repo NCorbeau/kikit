@@ -356,6 +356,26 @@ describe('document sessions', () => {
     expect(session.getSnapshot().editable).toBe(true);
   });
 
+  it('resumes cached editing after canceling an offline departure but keeps terminal denial locked', async () => {
+    const { session, transport } = harness();
+    await session.start(); await transport.message(sync());
+    transport.callbacks.connection('offline');
+    await session.pause();
+    expect(session.getSnapshot().editable).toBe(false);
+    session.retry();
+    await vi.waitFor(() => expect(transport.retries).toBe(1));
+    transport.callbacks.connection('offline');
+    expect(session.getSnapshot()).toMatchObject({ editable: true, connection: 'offline', serverSaved: false });
+    title(session.doc).insert(0, 'Continued offline '); await settled(session);
+    expect(JSON.parse(session.exportRecovery()).pending).toHaveLength(1);
+    await transport.message({ type: 'error', code: 'ACCESS_DENIED', message: 'Access was removed.', retryable: false });
+    await session.pause();
+    session.retry();
+    await vi.waitFor(() => expect(transport.retries).toBe(2));
+    expect(session.getSnapshot().editable).toBe(false);
+    expect(JSON.parse(session.exportRecovery()).pending).toHaveLength(1);
+  });
+
   it('rejects incompatible server state before applying it and can export an incompatible cache untouched', async () => {
     const { session, transport } = harness();
     await session.start();

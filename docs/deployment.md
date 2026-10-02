@@ -12,6 +12,8 @@ Use Resend Free, currently 3,000 emails/month and 100/day. Add a sender subdomai
 
 ## Build and service settings
 
+The shared-page changes are verified locally and have not been deployed. They require `0002_shared_pages.sql` (database schema 3), runtime grants for `page_invitations`, and matching protocol-2 web/server assets. Follow the existing stop/drain, migration and start procedure when a deployment is authorized; the currently hosted private-account slice remains separate evidence.
+
 1. Use the repository root as the service root. The root `Dockerfile` builds Node 24/pnpm 12.5.1, then copies the web bundle and production server dependencies into a non-root runtime image. `.dockerignore` excludes environment files and private local agent references.
 2. Remove stale build/start overrides that target the fixture. Use the Dockerfile's default start command. Root `pnpm start` also exists for a prepared Node workspace, fixing the original Railpack detection failure; Docker is the selected build route.
 3. Set one replica, no overlap, healthcheck `/api/health`, and a 30-second shutdown grace. Keep automatic deployments disabled until the stop/drain procedure below is in place.

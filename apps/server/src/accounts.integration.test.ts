@@ -71,12 +71,13 @@ describe.skipIf(!databaseUrl)('magic-link accounts and private notes on PostgreS
     return id;
   }
   async function connect(cookie: string, pageId: string) {
+    const account = (await app.inject({ url: '/api/session', headers: { cookie } })).json();
     const socket = new WebSocket(`${address.replace('http:', 'ws:')}/api/sync`, { origin, headers: { cookie } });
     sockets.push(socket);
     const messages: ServerMessage[] = [];
     socket.on('message', data => messages.push(JSON.parse(data.toString())));
     await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
-    socket.send(JSON.stringify({ type: 'hello', pageId, protocolVersion: PROTOCOL_VERSION, schemaVersion: DOCUMENT_SCHEMA_VERSION }));
+    socket.send(JSON.stringify({ type: 'hello', pageId, accountId: account?.accountId ?? 'expired-account', protocolVersion: PROTOCOL_VERSION, schemaVersion: DOCUMENT_SCHEMA_VERSION }));
     return { socket, messages };
   }
 
