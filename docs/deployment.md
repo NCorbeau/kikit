@@ -33,7 +33,7 @@ Railway's legacy `railway.json`/`railway.toml` configuration is deprecated in th
 
 ## Migration and runtime roles
 
-Create separate login roles through a privileged database connection. The migration role owns the application schema/tables and can apply DDL. The runtime role has no superuser, database creation, role creation, schema creation, or migration-history write privileges. Keep passwords in provider secrets; do not paste them into tracked SQL.
+Create separate login roles through a privileged database connection. The migration role owns the application schema/tables and can apply DDL. Grant it `CONNECT` and `CREATE` on the application database: Drizzle issues `CREATE SCHEMA IF NOT EXISTS` even for an existing schema, which requires the database-level `CREATE` privilege. This does not grant the role PostgreSQL `CREATEDB` or superuser privileges. Grant the runtime role only `CONNECT` on the database and the narrower schema/table privileges below. The runtime role has no superuser, database creation, role creation, schema creation, or migration-history write privileges. Keep passwords in provider secrets; do not paste them into tracked SQL.
 
 Run schema migration as a separate one-off process in the private network using the same image. Give that process only `KIKIT_MIGRATION_DATABASE_URL` for the privileged role and override its command with:
 
@@ -55,7 +55,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
 TO kikit_runtime;
 ```
 
-No runtime sequence grant is needed by the current tables. Review grants after each new migration. The local restore drill exercises these grants through real account signup, page creation, loading/writing, and verifies runtime DDL denial. Hosted role ownership/networking still need verification.
+No runtime sequence grant is needed by the current tables. Review grants after each new migration. The local restore drill exercises these grants through real account signup, page creation, loading/writing, and verifies runtime DDL denial. Hosted PostgreSQL 18.6 role creation, schema migration, runtime connection over the private network, and actual runtime DDL denial were verified on 2026-10-02; application signup/writing and hosted restore checks remain pending.
 
 ## First start and subsequent deployment
 

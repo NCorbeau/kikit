@@ -4,7 +4,7 @@
 
 Kikit is a small, local-first notes app built around a simple block editor. Its goal is to make writing feel immediate, keep your work safe through connection changes, and let people work together on the same page.
 
-**Status: private account slice implemented and verified locally.** Email magic links, account-scoped notes, authenticated synchronization, and recovery across logout are implemented alongside the original editor and durability checks. A production Docker image is available. Railway provisioning, real sender verification, and a hosted backup restore remain pending. Invitations and shared-page controls are deferred; this is not the complete v1 release.
+**Status: private account slice implemented and verified locally.** Email magic links, account-scoped notes, authenticated synchronization, and recovery across logout are implemented alongside the original editor and durability checks. A production Docker image is available. Railway PostgreSQL is provisioned and migrated; app deployment, real sender verification, and a hosted backup restore remain pending. Invitations and shared-page controls are deferred; this is not the complete v1 release.
 
 ![Typing in two independent Kikit windows, with edits synchronizing in both directions](docs/demos/live-sync.gif)
 
@@ -141,7 +141,7 @@ Test fault/metrics routes only exist with `NODE_ENV=test` **and** `KIKIT_TEST_FA
 
 The next release gates are actual Railway/email/backup verification, followed by invitations and collaboration with two distinct authenticated accounts. The private account slice does not satisfy the shared-page v1 gate.
 
-The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, and daily backups. No paid infrastructure was provisioned and nothing was published during these local checks. See [deployment](docs/deployment.md) for remaining setup and recovery limits.
+The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, and daily backups. The local checks provisioned no paid infrastructure. Railway setup was subsequently authorized on 2026-10-02; the hosted PostgreSQL migration and restricted-runtime DDL denial have passed, while app/email/backup verification is in progress. See [deployment](docs/deployment.md) for remaining setup and recovery limits.
 
 ## License
 
