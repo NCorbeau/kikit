@@ -139,9 +139,17 @@ Added the `Quality checks` workflow for pull requests targeting `main`, pushes t
 Executed locally on macOS/Apple Silicon with Node 24.21.0, pnpm 12.5.1, Docker PostgreSQL 17.9, and Playwright 1.63.0 Chromium for this change:
 
 - Frozen installation, typecheck, and build passed. The existing Vite large-chunk advisory remains.
-- 40 fast tests passed; the 20 PostgreSQL tests were intentionally skipped in that suite. The new test verifies that CI browser diagnostics omit credentials from errors, stdout/stderr, and arbitrary attachments.
+- 41 fast tests passed; the 20 PostgreSQL tests were intentionally skipped in that suite. Two new tests verify credential omission from errors/output/attachments and safe diagnostics when collection fails before tests start.
 - All 20 opted-in PostgreSQL integration tests and the disposable restore/restricted-role drill passed with `CI=true`.
 - All 18 fixture and two authenticated browser scenarios passed with `CI=true`, using the new reporter and separate output directories. Account tracing was disabled; email stayed captured in-process.
 - actionlint 1.7.12 accepted the workflow. Action references were resolved to commit SHAs from their upstream release tags.
 
-GitHub-hosted execution and deliberate failure/artifact drills are pending at this checkpoint. These local checks do not prove an Actions run or a merged default-branch workflow; MAC-100 remains in progress until those checks are recorded.
+### Hosted failure and artifact drill
+
+[Actions run 37016917906](https://github.com/NCorbeau/kikit/actions/runs/37016917906) exercised commit `d5b4695` on the proposed merge for [PR 4](https://github.com/NCorbeau/kikit/pull/4), using Ubuntu 24.04, Node 24.21.0, PostgreSQL 17.9, and Playwright 1.63.0 Chromium. Code quality and PostgreSQL integration/restore passed. Two temporary assertions deliberately failed the independent-browser fixture scenario and the authenticated multi-device scenario; the other 17 fixture scenarios and the second account scenario passed. Both browser commands returned failure, artifact uploads succeeded, and database cleanup succeeded.
+
+Downloaded both uploaded archives and verified their published SHA-256 digests and file allowlists. Fixture diagnostics contained a failed summary, two browser screenshots, and one trace. Account diagnostics contained a failed summary and three browser screenshots, with no trace. Inspected screenshots, the account job log, both summaries, and fixture trace streams: the account assertion's synthetic magic-link URL/session credentials were not published. Archives contained no recovery exports, dumps, or raw error-context files. Seven-day expiration was returned by GitHub.
+
+An earlier hosted drill, [run 37016360196](https://github.com/NCorbeau/kikit/actions/runs/37016360196), verified the same boundary before refreshing two action pins to their current Node 24 runtimes. The new runtime pins passed the repeated upload/drain drill without the older Node 20 runtime warning.
+
+The temporary failure assertions have been removed. After adding the collection-failure reporter regression, typecheck, the 41-test fast suite, actionlint, and representative fixture/account browser scenarios passed locally again. A full successful run of the clean PR head remains pending at this checkpoint. Merge/default-branch execution and repository rulesets requiring these checks remain separate evidence; this PR does not deploy the application or complete other v1 gates.

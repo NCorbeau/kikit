@@ -48,8 +48,6 @@ test('two independent browser contexts edit concurrently and reload committed co
   await peer.page.reload();
   await expectServerSaved(peer.page);
   await expect(peer.page.getByRole('textbox', { name: 'Page body', exact: true })).toContainText(tokenA);
-  // Temporary MAC-100 drill: verify a real failed check retains both browser views.
-  expect('MAC-100 fixture failure drill').toBe('removed after artifact verification');
 });
 
 test('clicking below a short note keeps writing in the page body', async ({ browser }) => {

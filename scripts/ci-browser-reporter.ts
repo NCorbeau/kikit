@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestResult } from '@playwright/test/reporter';
 
 type ResultSummary = {
@@ -16,10 +16,15 @@ type ResultSummary = {
 // Browser errors, stdout, and traces can contain login URLs and cookies.
 // Publish only explicit diagnostic fields; never serialize a raw TestResult.
 export default class CiBrowserReporter implements Reporter {
-  private outputDir = '';
+  private outputDir: string;
   private total = 0;
   private runnerErrors = 0;
   private readonly results: ResultSummary[] = [];
+
+  constructor(options: { outputDir: string }) {
+    // Collection/configuration can fail before onBegin is called.
+    this.outputDir = resolve(options.outputDir);
+  }
 
   onBegin(config: FullConfig, suite: Suite) {
     this.outputDir = config.projects[0].outputDir;

@@ -11,7 +11,7 @@ it('keeps failure status and screenshots without publishing credentials from err
   const error = vi.spyOn(console, 'error').mockImplementation(() => {});
   const credential = 'test-only-secret-that-must-not-be-published';
   try {
-    const reporter = new CiBrowserReporter();
+    const reporter = new CiBrowserReporter({ outputDir });
     reporter.onBegin({ projects: [{ outputDir }] } as FullConfig, { allTests: () => [1] } as unknown as Suite);
     reporter.onTestEnd({
       title: 'account isolation',
@@ -40,6 +40,24 @@ it('keeps failure status and screenshots without publishing credentials from err
       results: [{ status: 'failed', expectedStatus: 'passed', errors: 1,
         location: 'tests/e2e/accounts.spec.ts:42', screenshots: ['account/test-failed-1.png'] }],
     });
+  } finally {
+    log.mockRestore(); error.mockRestore();
+    await rm(outputDir, { recursive: true, force: true });
+  }
+});
+
+it('writes a safe summary when collection fails before any browser test starts', async () => {
+  const outputDir = await mkdtemp(join(tmpdir(), 'kikit-ci-collection-'));
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const reporter = new CiBrowserReporter({ outputDir });
+    const output: Reporter = reporter;
+    output.onError?.({ message: 'secret in a configuration failure' });
+    await reporter.onEnd({ status: 'failed' } as FullResult);
+    const summary = await readFile(join(outputDir, 'summary.json'), 'utf8');
+    expect(JSON.parse(summary)).toMatchObject({ status: 'failed', runnerErrors: 1, results: [] });
+    expect(summary + JSON.stringify([...log.mock.calls, ...error.mock.calls])).not.toContain('secret in a configuration failure');
   } finally {
     log.mockRestore(); error.mockRestore();
     await rm(outputDir, { recursive: true, force: true });
