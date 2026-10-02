@@ -1,5 +1,5 @@
-/* This worker is registered only by the local development application. */
-const SHELL_CACHE_NAME = 'kikit-dev-shell-v1';
+/* Only public app assets are cached. Authentication and notes are never cached here. */
+const SHELL_CACHE_NAME = 'kikit-shell-v2';
 
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
@@ -36,6 +36,10 @@ async function fetchShellResource(request) {
     // modes, but these public same-origin assets are identical.
     const cached = await cache.match(request, { ignoreVary: true });
     if (cached) return cached;
+    if (request.mode === 'navigate') {
+      const shell = await cache.match('/');
+      if (shell) return shell;
+    }
     throw error;
   }
 }

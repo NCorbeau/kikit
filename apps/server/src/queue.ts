@@ -47,6 +47,8 @@ export class PageQueues {
 
   constructor(private readonly limits: QueueLimits = DEFAULT_LIMITS) {}
 
+  get pageIds(): readonly string[] { return [...this.queues.keys()]; }
+
   async run<T>(pageId: string, bytes: number, task: () => Promise<T>): Promise<T> {
     if (!this.accepting) throw new ShutdownError('Server is draining');
     let page = this.queues.get(pageId);

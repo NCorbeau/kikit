@@ -10,7 +10,9 @@ import {
   type ClientMessage,
 } from '@kikit/contracts';
 import { commitUpdate, loadPage, type CommitResult } from './persistence.js';
-import { normalizeEmptyBody } from './document.js';
+import { normalizeEmptyBody, projectTitle } from './document.js';
+import { canAccessPage, type Principal } from './pages.js';
+import { AccessError } from './persistence-errors.js';
 import { PageQueues } from './queue.js';
 import { TestFaults } from './test-faults.js';
 import {
@@ -32,14 +34,16 @@ type UpdateMessage = Extract<ClientMessage, { type: 'update' }>;
 export class SyncRooms {
   readonly queues = new PageQueues();
   private readonly rooms = new Map<string, Room>();
+  private readonly principals = new WeakMap<WebSocket, Principal>();
 
   constructor(private readonly pool: pg.Pool, private readonly faults: TestFaults) {}
 
   get size(): number { return this.rooms.size; }
 
-  join(pageId: string, socket: WebSocket): Promise<void> {
+  join(pageId: string, socket: WebSocket, principal: Principal = { accountId: DEV_ACCOUNT_ID }): Promise<void> {
+    this.principals.set(socket, principal);
     return this.queues.run(pageId, 0, async () => {
-      const loaded = await loadPage(this.pool, pageId, DEV_ACCOUNT_ID);
+      const loaded = await loadPage(this.pool, pageId, principal.accountId, principal.sessionId);
       let room = this.rooms.get(pageId);
       if (room && room.sequence !== loaded.sequence) {
         loaded.doc.destroy();
@@ -84,7 +88,12 @@ export class SyncRooms {
     return this.queues.run(pageId, update.byteLength, async () => {
       const room = this.rooms.get(pageId);
       if (!room || !room.sockets.has(socket)) throw new Error('Handshake has not completed');
+      await this.pruneUnauthorized(pageId, room);
+      if (!room.sockets.has(socket)) throw new AccessError('Session expired or revoked');
       const result = await this.commitToStorage(pageId, socket, room, message, update);
+      // Database revocation/expiry during a commit must be checked before propagation.
+      try { await this.pruneUnauthorized(pageId, room); }
+      catch (error) { this.invalidate(pageId); throw error; }
       // A duplicate receipt keeps its original sequence. Only new commits advance the room.
       if (!result.duplicate) this.applyCommittedUpdate(pageId, room, socket, result, update);
       // The author needs the original server repair before its receipt, even on retry.
@@ -111,9 +120,13 @@ export class SyncRooms {
     update: Uint8Array,
   ): Promise<CommitResult> {
     try {
-      return await commitUpdate(this.pool, pageId, DEV_ACCOUNT_ID, message.batchId, update, {
+      const principal = this.principals.get(socket)!;
+      let title = '';
+      return await commitUpdate(this.pool, pageId, principal.accountId, message.batchId, update, {
+        sessionId: principal.sessionId,
         beforeCommit: this.faults.beforeCommit,
-        validate: () => prepareCommittedUpdate(room.doc, update),
+        validate: () => prepareCommittedUpdate(room.doc, update, value => { title = value; }),
+        projectTitle: () => title,
         afterCommit: this.faults.afterCommit,
       });
     } catch (error) {
@@ -124,6 +137,28 @@ export class SyncRooms {
         this.invalidate(pageId);
       }
       throw error;
+    }
+  }
+
+  /** Auth mutations and the expiry sweep remove sockets before subsequent broadcasts. */
+  async revalidate(): Promise<void> {
+    // Include admitted joins whose room has not been installed yet. A logout
+    // response must wait behind those handshakes as well as existing rooms.
+    const pageIds = new Set([...this.rooms.keys(), ...this.queues.pageIds]);
+    await Promise.all([...pageIds].map(pageId => this.queues.run(pageId, 0, async () => {
+      const room = this.rooms.get(pageId);
+      if (room) await this.pruneUnauthorized(pageId, room);
+    }).catch(() => this.invalidate(pageId))));
+  }
+
+  private async pruneUnauthorized(pageId: string, room: Room): Promise<void> {
+    for (const socket of room.sockets) {
+      const principal = this.principals.get(socket)!;
+      if (!principal.sessionId) continue;
+      if (!await canAccessPage(this.pool, pageId, principal)) {
+        room.sockets.delete(socket);
+        reportFailure(socket, new AccessError('Session expired or revoked'));
+      }
     }
   }
 
@@ -167,7 +202,7 @@ export class SyncRooms {
   }
 }
 
-function prepareCommittedUpdate(committedDoc: Y.Doc, update: Uint8Array): Uint8Array | void {
+function prepareCommittedUpdate(committedDoc: Y.Doc, update: Uint8Array, onTitle: (title: string) => void): Uint8Array | void {
   const candidate = new Y.Doc();
   try {
     Y.applyUpdate(candidate, Y.encodeStateAsUpdate(committedDoc));
@@ -176,6 +211,7 @@ function prepareCommittedUpdate(committedDoc: Y.Doc, update: Uint8Array): Uint8A
     const needsRepair = candidate.getXmlFragment(BODY_FRAGMENT).length === 0;
     const beforeRepair = Y.encodeStateVector(candidate);
     normalizeEmptyBody(candidate);
+    onTitle(projectTitle(candidate));
     // Receipt hashes cover submitted bytes. Repairs join them in the committed payload.
     if (needsRepair) return Y.mergeUpdates([update, Y.encodeStateAsUpdate(candidate, beforeRepair)]);
   } catch (error) {

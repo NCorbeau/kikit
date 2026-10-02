@@ -1,6 +1,6 @@
-/** Development-only shell cache. Document content belongs exclusively in IndexedDB. */
+/** Public shell cache. Account-scoped document content belongs exclusively in IndexedDB. */
 export async function registerOfflineShell(): Promise<void> {
-  if (!import.meta.env.DEV || !('serviceWorker' in navigator)) return;
+  if (!('serviceWorker' in navigator)) return;
   try {
     const registration = await navigator.serviceWorker.register('/offline-shell.js');
     await navigator.serviceWorker.ready;

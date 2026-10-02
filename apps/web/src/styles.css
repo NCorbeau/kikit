@@ -192,21 +192,12 @@ button:focus-visible, summary:focus-visible, a:focus-visible {
   width: min(720px, calc(100% - 64px));
   margin: 72px auto 80px;
   flex: 1;
+  display: flex;
+  flex-direction: column;
   outline: none;
 }
-.page-title { margin-bottom: 18px; }
-.page-title, .page-body { position: relative; }
-.page-title:has(.tiptap:focus-visible)::before,
-.page-body:has(.tiptap:focus-visible)::before {
-  content: "";
-  position: absolute;
-  top: 6px;
-  left: -10px;
-  width: 2px;
-  height: 16px;
-  border-left: 2px solid var(--focus);
-  pointer-events: none;
-}
+.page-title { margin-bottom: 4px; }
+.page-body { flex: 1; display: flex; }
 .tiptap {
   outline: none;
   overflow-wrap: anywhere;
@@ -231,9 +222,17 @@ button:focus-visible, summary:focus-visible, a:focus-visible {
 .format-bar {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  margin-bottom: 24px;
+  height: 28px;
+  margin-bottom: 4px;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
+.writing-area:has(.page-body:focus-within) .format-bar,
+.format-bar:hover,
+.format-bar:focus-within { visibility: visible; opacity: 1; }
 .format-group {
   display: flex;
   gap: 2px;
@@ -276,6 +275,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible {
 }
 
 .body-editor {
+  flex: 1;
   min-height: 300px;
   font-size: 16px;
   line-height: 1.65;
@@ -430,3 +430,28 @@ button:focus-visible, summary:focus-visible, a:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+.account-panel { width: min(560px, calc(100% - 48px)); margin: 88px auto; }
+.account-panel h1 { font-size: 28px; font-weight: 600; letter-spacing: -0.03em; }
+.account-panel p { line-height: 1.6; color: var(--muted); }
+.account-panel form { display: grid; gap: 12px; margin-top: 28px; }
+.account-panel label { font-size: 13px; }
+.account-panel input { width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+.account-panel button, .leave-dialog button { padding: 9px 13px; border: 0; border-radius: var(--radius); background: transparent; }
+.account-panel button:hover:not(:disabled), .leave-dialog button:hover:not(:disabled) { background: var(--hover); }
+.document-actions > button:not(.icon-button):not(.export-button) { border: 0; background: transparent; border-radius: var(--radius); padding: 6px; font-size: 12px; white-space: nowrap; color: var(--muted); }
+.document-actions > button:not(.icon-button):not(.export-button):hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.account-panel input:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.account-panel .primary-button, .leave-dialog .primary-button { background: var(--ink); color: var(--surface); }
+.account-panel .primary-button:hover:not(:disabled), .leave-dialog .primary-button:hover:not(:disabled) { background: var(--ink); opacity: 0.85; }
+.primary-button:disabled { opacity: 0.5; }
+.account-error { color: var(--error) !important; }
+.notes-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.note-list { list-style: none; padding: 0; margin-top: 28px; }
+.note-list li { border-bottom: 1px solid var(--line); }
+.note-list button { width: 100%; text-align: left; padding: 16px 0; font-size: 16px; overflow-wrap: anywhere; }
+.account-email { font-size: 13px; }
+.leave-dialog { width: min(480px, calc(100% - 32px)); padding: 28px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); box-shadow: 0 12px 40px rgb(0 0 0 / 0.16); }
+.leave-dialog::backdrop { background: rgb(0 0 0 / 0.35); }
+.leave-dialog h2 { margin-top: 0; font-size: 20px; }
+.leave-dialog p { line-height: 1.6; }

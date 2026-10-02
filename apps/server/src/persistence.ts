@@ -6,6 +6,7 @@ import * as Y from 'yjs';
 import { DOCUMENT_SCHEMA_VERSION } from '@kikit/contracts';
 import { AccessError, CompatibilityError, ReceiptConflict } from './persistence-errors.js';
 import { documentUpdates, pageGrants, pages, receipts } from './schema.js';
+import { lockSession } from './pages.js';
 
 export { AccessError, CompatibilityError, ReceiptConflict } from './persistence-errors.js';
 export { migrateDatabase } from './migrations.js';
@@ -19,6 +20,8 @@ export interface CommitHooks {
   beforeCommit?: () => Promise<void>;
   validate?: () => Uint8Array | void;
   afterCommit?: () => void;
+  projectTitle?: () => string;
+  sessionId?: string;
 }
 
 export function createPool(connectionString: string): pg.Pool {
@@ -65,6 +68,7 @@ export async function loadPage(
   pool: pg.Pool,
   pageId: string,
   accountId: string,
+  sessionId?: string,
 ): Promise<{ doc: Y.Doc; sequence: number }> {
   const client = await pool.connect();
   const db = drizzle(client);
@@ -72,6 +76,7 @@ export async function loadPage(
   let discardConnection = false;
   try {
     await client.query('BEGIN');
+    await lockSession(db, { accountId, sessionId });
     const page = await authorizeLockedPage(db, pageId, accountId);
     Y.applyUpdate(doc, page.initialState);
     const updates = await db.select({ payload: documentUpdates.payload })
@@ -108,6 +113,7 @@ export async function commitUpdate(
   const payloadHash = createHash('sha256').update(update).digest('hex');
   try {
     await client.query('BEGIN');
+    await lockSession(db, { accountId, sessionId: hooks.sessionId });
     const page = await authorizeLockedPage(db, pageId, accountId);
     const [receipt] = await db.select({
       payloadHash: receipts.payloadHash,
@@ -134,7 +140,7 @@ export async function commitUpdate(
     const sequence = page.sequence + 1;
     await db.insert(documentUpdates).values({ pageId, sequence, payload: Buffer.from(committedUpdate) });
     await db.insert(receipts).values({ pageId, batchId, payloadHash, sequence });
-    await db.update(pages).set({ sequence }).where(eq(pages.id, pageId));
+    await db.update(pages).set({ sequence, ...(hooks.projectTitle ? { title: hooks.projectTitle() } : {}) }).where(eq(pages.id, pageId));
     await hooks.beforeCommit?.();
     // No client timeout races this transaction. Unknown results stay unacknowledged.
     await client.query('COMMIT');

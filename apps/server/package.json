@@ -11,12 +11,16 @@
     "db:generate": "drizzle-kit generate --config drizzle.config.ts"
   },
   "dependencies": {
+    "@better-auth/drizzle-adapter": "1.7.7",
+    "@fastify/static": "^10.1.5",
     "@fastify/websocket": "^11.2.0",
     "@kikit/contracts": "workspace:*",
+    "better-auth": "1.7.7",
     "drizzle-orm": "0.45.3",
     "fastify": "5.12.5",
     "p-queue": "9.3.3",
     "pg": "^8.16.0",
+    "tsx": "^4.23.15",
     "ws": "^8.18.0",
     "yjs": "13.6.33"
   },

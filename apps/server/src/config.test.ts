@@ -14,14 +14,14 @@ describe('development fixture boundary', () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('KIKIT_DEV_FIXTURE', '1');
     const connect = vi.fn();
-    await expect(seedDevelopmentPage({ connect } as unknown as pg.Pool)).rejects.toThrow('Production authentication is not implemented');
+    await expect(seedDevelopmentPage({ connect } as unknown as pg.Pool)).rejects.toThrow('It cannot run in production');
     expect(connect).not.toHaveBeenCalled();
   });
 
   it('fails closed in production even if the fixture flag is enabled', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('KIKIT_DEV_FIXTURE', '1');
-    await expect(createServer()).rejects.toThrow('Production authentication is not implemented');
+    await expect(createServer()).rejects.toThrow('It cannot run in production');
   });
 
   it('requires explicit opt-in in development and test', () => {
@@ -54,5 +54,17 @@ describe('development fixture boundary', () => {
     finally {
       await app.close();
     }
+  });
+
+  it('does not expose query parameters from an unexpected HTTP failure', async () => {
+    vi.stubEnv('NODE_ENV', 'development'); vi.stubEnv('KIKIT_DEV_FIXTURE', '1');
+    const app = await createServer();
+    app.get('/api/harness-error', async () => { throw new Error('Failed query: session token private-marker'); });
+    try {
+      const response = await app.inject({ url: '/api/harness-error' });
+      expect(response.statusCode).toBe(503);
+      expect(response.body).not.toContain('private-marker');
+      expect(response.headers['cache-control']).toBe('no-store');
+    } finally { await app.close(); }
   });
 });

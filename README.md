@@ -4,7 +4,7 @@
 
 Kikit is a small, local-first notes app built around a simple block editor. Its goal is to make writing feel immediate, keep your work safe through connection changes, and let people work together on the same page.
 
-**Status: first local development milestone.** The editor, browser journal, custom WebSocket synchronization, PostgreSQL persistence, and failure/recovery tests work locally. Real accounts, invitations, production authorization, hosting, and backups are subsequent work. This is not ready for valuable or private notes.
+**Status: private account slice deployed on Railway.** Email magic links, account-scoped notes, authenticated synchronization, and recovery across logout are implemented and verified locally. The production Docker image and migrated PostgreSQL database are running in Amsterdam. Live HTTPS, database health, anonymous-access denial, and origin checks passed on 2026-10-02. Real email login and authenticated hosted editing remain to be checked. Backups and hosted restore are deferred for disposable test notes. Invitations and shared-page controls are deferred; this is not the complete v1 release.
 
 ![Typing in two independent Kikit windows, with edits synchronizing in both directions](docs/demos/live-sync.gif)
 
@@ -40,11 +40,20 @@ pnpm db:migrate
 
 Commit the SQL file and generated `meta/` files together. Add a new migration for subsequent changes; never edit an applied file. The runner uses Drizzle's migration history, verifies recorded checksums, and locks migration admission so concurrent runs cannot apply the same file twice. Pending SQL and its history entries commit together; failed migrations roll back. The initial baseline adopts the original milestone's local schema without replacing stored notes or receipts.
 
-`pnpm db:migrate` applies schema migrations, then invokes a separate, explicitly development-only seed. Repeated seeding retains the page's original binary identity. The server does not migrate on startup. This workflow currently supports transactional, forward migrations; operations that must run outside a transaction and production migration privileges remain future work.
+`pnpm db:migrate` applies schema migrations, then invokes a separate, explicitly development-only seed. Repeated seeding retains the page's original binary identity. The server does not migrate on startup. `pnpm db:migrate:production` requires a separately supplied `KIKIT_MIGRATION_DATABASE_URL` and never seeds the fixture. The workflow supports transactional, forward migrations; operations that must run outside a transaction are deferred. See [deployment and database privileges](docs/deployment.md).
+
+## Account application
+
+The production server serves the built web app, authentication HTTP routes, and custom WebSocket sync from one origin. Root `pnpm start` supplies the start command missing from the original Railway build. The root Dockerfile pins the supported Node/pnpm setup and includes runtime dependencies and built assets.
+
+Use [the deployment guide](docs/deployment.md) for Railway settings, separate database roles, email sender verification, and restore checks. [.env.example](.env.example) lists required variables using placeholders; export them or configure provider secrets. The server does not load environment files automatically. Do not enable `KIKIT_DEV_FIXTURE` on Railway.
+
+The [account contract](docs/accounts-contract.md) describes cookies, authorization, offline account hints, and recovery. Email delivery is substituted only inside the automated test harness; there is no public test-login or magic-link discovery endpoint.
 
 ## What works
 
 - A collaborative page title, paragraphs, and headings at levels 1–3.
+- Email magic-link accounts, a private note list, and idempotent creation of empty notes.
 - Normal typing, selection, Enter/Backspace, paste, local collaborative undo/redo, heading shortcuts, labelled controls, visible keyboard focus, and a responsive writing surface.
 - A compact writing UI with light/dark themes. Appearance follows the system until you choose a mode using the header toggle; your choice is remembered locally.
 - Stable block IDs retained for existing blocks and regenerated for split/pasted blocks.
@@ -56,13 +65,13 @@ Commit the SQL file and generated `meta/` files together. Add a new migration fo
 
 The status menu explains local and server durability separately. **Saved on this device** means the IndexedDB transaction completed. **Saved to server** means the current session has synchronized and every pending batch has a durable receipt. Being connected alone does not establish that guarantee. A local save failure keeps unsaved work in memory and warns before leaving: keep the tab open, retry, or export recovery.
 
-The development-only service worker caches the app shell after an initial connected load, enabling an actual offline reload. API responses and note contents are never put in that shell cache. Notes live in IndexedDB, namespaced by fixture account and page. Browser cache eviction or clearing site data can remove locally saved work. If source/dependency changes leave a stale development shell, reconnect and reload; unregister only the shell worker/cache when troubleshooting, and preserve IndexedDB.
+The service worker caches the app shell after an initial connected load, enabling an actual offline reload in both account and fixture modes. API responses and note contents are never put in that shell cache. Notes live in IndexedDB, namespaced by account and page. The last account and note-list metadata provide an offline hint, not server authorization. Signing out removes that hint and retains each account's journal. Browser cache eviction or clearing site data can remove locally saved work. If source/dependency changes leave a stale shell, reconnect and reload; unregister only the shell worker/cache when troubleshooting, and preserve IndexedDB.
 
 ## Development identity boundary
 
-This milestone has exactly one explicit local identity and seeded page. `pnpm dev` and `pnpm db:migrate` opt into it using `NODE_ENV=development KIKIT_DEV_FIXTURE=1`. Backend creation refuses all other modes, including production even when the fixture flag is set. HTTP/WS fixture access is loopback-restricted and the WebSocket requires the configured Origin. The production frontend build refuses to initialize a fixture session.
+The fixture has exactly one explicit local identity and seeded page. `pnpm dev` and `pnpm db:migrate` opt into it using `NODE_ENV=development KIKIT_DEV_FIXTURE=1`. Production refuses the fixture flag; without it, the server uses real account configuration. HTTP/WS fixture access is loopback-restricted and the WebSocket requires the configured Origin. The production frontend build refuses to initialize a fixture session.
 
-Page access is checked separately through PostgreSQL grants on handshake and each transaction. This exercises the integration boundary; it is **not authentication**, and two development browser contexts are not two authenticated accounts. Better Auth sessions, cookie/CSRF policy, active connection revocation, account switching, invitation redemption, and owner/editor controls are not implemented. Do not publish or proxy this development fixture to the Internet.
+Fixture page access is checked separately through PostgreSQL grants on handshake and each transaction. This exercises the integration boundary; it is **not authentication**, and two development browser contexts are not two authenticated accounts. Account mode validates Better Auth sessions and independently checks page grants. Invitation redemption and owner/editor management controls remain deferred. Do not publish or proxy the development fixture to the Internet.
 
 ## Architecture and edit flow
 
@@ -75,8 +84,10 @@ Page access is checked separately through PostgreSQL grants on handshake and eac
 | `apps/web/src/editor` | Tiptap/ProseMirror schema, Yjs bindings, keyboard behavior, block IDs |
 | `apps/web/src/session/local-store.ts` | Typed `idb` transactions for account/page history and the durable outbound journal |
 | `apps/web/src/session/index.ts` | Hydration, local persistence, pending batches, truthful state and recovery |
-| `apps/web/src/session/sync-client.ts` | Fixture handshake, WebSocket transport, ordered messages and reconnection |
-| `apps/server/src/app.ts` | Server wiring, development routes, connection admission and shutdown |
+| `apps/web/src/account` | Account lifetime, sign-in, private note list and guarded navigation |
+| `apps/web/src/session/sync-client.ts` | Authorized page handshake, WebSocket transport, ordered messages and reconnection |
+| `apps/server/src/app.ts` | Same-origin server wiring, static assets, connection admission and shutdown |
+| `apps/server/src/auth.ts` and `pages.ts` | Better Auth/email integration, session locks, private page creation and access |
 | `apps/server/src/sync-connection.ts` | Socket lifetime, handshake and incoming message validation |
 | `apps/server/src/sync-room.ts` | Page rooms, serialized commit/application, propagation and recovery |
 | `apps/server/src/sync-protocol.ts` | Bounded outgoing messages and protocol error mapping |
@@ -108,9 +119,11 @@ pnpm build
 pnpm exec playwright install chromium
 pnpm test:e2e
 pnpm test:integration
+pnpm test:e2e:accounts
+pnpm test:restore
 ```
 
-Run `pnpm db:up` before the integration/browser suites. They use a separate local `kikit_e2e` database. **The browser suite resets that database's public schema**, starts its own backend on 3002 and Vite on 5174, and uses fresh independent browser contexts. It never resets `kikit`. Do not run the browser and PostgreSQL integration suites concurrently.
+Run `pnpm db:up` before the integration/browser suites. They use a separate local `kikit_e2e` database. **The fixture browser suite resets that database's public schema**, starts its own backend on 3002 and Vite on 5174, and uses fresh independent browser contexts. The account suite serves the production build on 5198 with actual Better Auth sessions and captured test emails. Neither suite resets `kikit`. Do not run the browser and PostgreSQL integration suites concurrently. The restore drill creates and removes uniquely named local databases and a restricted runtime role; it ignores production connection variables.
 
 `pnpm test` runs fast Vitest checks; PostgreSQL integration tests are explicitly skipped there. `pnpm test:integration` opts into the real database checks. Browser coverage includes concurrent edits, offline reload/reconnect, duplicate IDs, lost acknowledgements, uncertain COMMIT outcomes, restart, a real PostgreSQL write-failure trigger, keyboard split/merge, paste IDs, collaborative undo, composition events and access/version/origin denial. These tests use the real backend and PostgreSQL, without substituting browser-local message passing.
 
@@ -118,17 +131,17 @@ Test fault/metrics routes only exist with `NODE_ENV=test` **and** `KIKIT_TEST_FA
 
 ## Current limits and next milestone
 
-- One active server instance, one fixture page, no page list or real accounts. PostgreSQL does not coordinate in-memory rooms across replicas.
+- One active account server, private notes, no invitations or sharing UI yet. PostgreSQL does not coordinate in-memory rooms across replicas. An ownership lock rejects a second account server; deployments require stopping and draining the old instance first.
 - Plain text paragraphs/headings only: no marks, lists, attachments, presence, comments, drag reordering, or advanced blocks.
 - Full-state handshakes and retained binary update histories; no snapshot compaction/pruning. Updates are limited to 256 KiB and committed documents to 2 MiB. These are guardrails, not measured capacity claims.
 - Queues admit at most 64 operations/8 MiB per page and 256 operations/32 MiB globally, including running work. At most 128 sockets; each socket has a 4 MiB outbound budget. Overload leaves uncommitted edits pending.
 - PostgreSQL applies 5-second statement, 2-second lock, and 15-second transaction limits. Queue ownership stays with an operation until completion/rollback. Shutdown stops admission, rejects queued work, and waits for active operations; a network blackhole can still delay shutdown. No deployment deadline or production availability target is claimed.
-- Binary recovery export has no import UI yet. No production backups/restore policy, migration-role separation, performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
-- `pnpm build` verifies bundling; it is not a runnable production release. The initial editor bundle currently produces Vite's large-chunk advisory.
+- Binary recovery export has no import UI yet. The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; backups and hosted restoration remain deferred until before valuable notes. No performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
+- The Docker image serves the production bundle. Hosted HTTPS and startup are verified; real email delivery and authenticated hosted editing remain unverified. The editor bundle produces Vite's large-chunk advisory.
 
-The recommended next milestone is real Better Auth login with account-scoped pages and enforced owner/editor access, including session expiry/revocation and recovery across account switches. Select the initial login method before that work. Then add invitations and verify collaboration with two distinct authenticated accounts.
+The next release gates are real hosted email login and authenticated editing/synchronization, tested hosted backups before valuable notes, and invitations/collaboration with two distinct authenticated accounts. The private account slice does not satisfy the shared-page v1 gate.
 
-Public deployment, Railway plan/region/budget, and backup/retention and recovery targets remain open decisions. No paid infrastructure was provisioned and nothing was publicly deployed. The eventual v1 still targets private notes and signed-in collaboration with invitations; this local milestone is its technical foundation.
+The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, with scheduled backups deferred for disposable test notes. Tested backups and restoration are required before valuable notes. The local checks provisioned no paid infrastructure. Railway setup was subsequently authorized on 2026-10-02; the hosted PostgreSQL migration, restricted-runtime DDL denial, application startup, and HTTPS/access smoke checks have passed. Real email login and hosted authenticated editing remain unverified. See [deployment](docs/deployment.md) for remaining setup and recovery limits.
 
 ## License
 

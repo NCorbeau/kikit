@@ -13,15 +13,20 @@ function createParagraph(value: string, id?: string): Y.XmlElement {
   return block;
 }
 
-export function createSeed(): Uint8Array {
+export function createSeed(title = 'A little space to think', body = 'Start with a thought. Make room for the next one.'): Uint8Array {
   const doc = new Y.Doc();
-  doc.getXmlFragment(TITLE_FRAGMENT).insert(0, [createParagraph('A little space to think')]);
+  doc.getXmlFragment(TITLE_FRAGMENT).insert(0, [createParagraph(title)]);
   doc.getXmlFragment(BODY_FRAGMENT).insert(0, [
-    createParagraph('Start with a thought. Make room for the next one.', randomUUID()),
+    createParagraph(body, randomUUID()),
   ]);
   const update = Y.encodeStateAsUpdate(doc);
   doc.destroy();
   return update;
+}
+
+export function projectTitle(doc: Y.Doc): string {
+  const paragraph = doc.getXmlFragment(TITLE_FRAGMENT).get(0) as Y.XmlElement;
+  return paragraph.toArray().map(node => node.toString()).join('').slice(0, 150);
 }
 
 export function validateDocument(doc: Y.Doc): void {
