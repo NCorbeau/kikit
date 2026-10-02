@@ -4,7 +4,7 @@ Implemented locally on 2026-10-02. This extends [milestone 1](milestone-contract
 
 ## Versions and data
 
-Document schema and wire protocol remain version 1. Database schema is version 2: Better Auth tables and a derived page-list title are added by `0001_accounts.sql`. Existing binary states, updates, receipts, ownership, and grants are retained. The list title is updated inside the document commit transaction and truncated to 150 characters; it is not editable storage. No REST document save exists.
+This original account slice used document/wire version 1 and database schema 2: Better Auth tables and a derived page-list title were added by `0001_accounts.sql`. The subsequent [shared-page slice](shared-pages-contract.md) keeps document schema 1 and advances wire protocol to 2 and database schema to 3. Existing binary states, updates, receipts, ownership, and grants are retained. The list title is updated inside the document commit transaction and truncated to 150 characters; it is not editable storage. No REST document save exists.
 
 Better Auth 1.7.7 uses the Drizzle PostgreSQL adapter. Authentication records live in `auth_user`, `auth_session`, `auth_account`, and `auth_verification`. Credentials and permissions remain outside the Y.Doc. Fixture/historical ownership values are retained rather than silently adopted by newly registered users.
 
@@ -24,7 +24,7 @@ The auth limiter is enabled (60 requests/minute globally per IP, with the magic-
 | `POST /api/pages` | Client UUID; retry preserves initial Yjs identity; another owner's UUID is denied |
 | `GET /api/pages/:pageId/session` | Authorized identity and document/protocol versions |
 | `/api/sync` | Authenticated WebSocket; page access checked on join and every update |
-| `GET /api/health` | 200 only when the database is reachable with schema version 2 |
+| `GET /api/health` | 200 only when the database is reachable with the application's expected schema version: 2 for the original account slice, 3 after shared pages |
 
 Each new note is initialized once with an empty title and one empty body paragraph. The owner grant is created in the same transaction. Creation is serialized per account and bounded to 100 owned notes as an initial resource guardrail. Deletion remains deferred. The [shared-page slice](shared-pages-contract.md) adds invitation and membership controls with database schema 3.
 
@@ -46,4 +46,4 @@ Before navigation/logout, the session pauses editing and transport, then settles
 
 The slice covers magic-link accounts and private notes. Same-account devices synchronize through the custom backend. The [shared-page slice](shared-pages-contract.md) adds invitations, membership management, revocation recovery and transient presence/cursors, advancing the wire protocol to 2 and database schema to 3. Note deletion remains deferred. Two distinct-account private-page denial is tested; hosted sharing remains a separate release gate.
 
-See [verification](verification.md) for executed checks and [deployment](deployment.md) for hosted setup. Actual HTTPS cookies/proxy behavior, real Resend delivery, daily Railway backups, and a Railway restore must be verified before valuable production notes are stored.
+See [verification](verification.md) for executed checks and [deployment](deployment.md) for hosted setup. Real email login, HTTPS cookie attributes, private synchronization/isolation and logout recovery have recorded hosted evidence. Natural session renewal/expiry remains open. Scheduled Railway backups and a hosted restore must still be tested before valuable production notes are stored.

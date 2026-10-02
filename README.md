@@ -4,7 +4,7 @@
 
 Kikit is a small, local-first notes app built around a simple block editor. Its goal is to make writing feel immediate, keep your work safe through connection changes, and let people work together on the same page.
 
-**Status: shared pages implemented locally; private account slice deployed on Railway.** Email magic links, account-scoped notes, authenticated synchronization, and recovery across logout are implemented and verified locally. The production Docker image and migrated PostgreSQL database are running in Amsterdam. Live HTTPS, database health, anonymous-access denial, and origin checks passed on 2026-10-02. Real email login and authenticated hosted editing remain to be checked. Backups and hosted restore are deferred for disposable test notes. Invitation links/QR joins, owner-only controls, active/offline revocation with recoverable drafts, and transient participants/cursors are implemented locally. Hosted sharing is unverified. This is not the complete v1 release.
+**Status: shared pages merged and verified locally; private accounts verified on Railway.** Invitation links/QR joins, owner-only controls, active/offline revocation with recoverable drafts, and transient participants/cursors are implemented. Recorded hosted checks on 2026-10-02 passed real email login, secure cookies, private editing/synchronization, cross-account isolation, and logout recovery. Hosted session renewal/expiry, shared-page rollout, backups and restore remain open. The latest recorded deployment is the private-account slice in Amsterdam; merging code does not deploy it. See [dated evidence and conditions](docs/verification.md). This is not the complete v1 release.
 
 ![Typing in two independent Kikit windows, with edits synchronizing in both directions](docs/demos/live-sync.gif)
 
@@ -85,20 +85,24 @@ Fixture page access is checked separately through PostgreSQL grants on handshake
 
 | Module | Responsibility |
 | --- | --- |
-| `apps/web/src/App.tsx` and `components/DocumentPage.tsx` | Session/page composition and restrained loading, offline, and recovery UI |
+| `apps/web/src/App.tsx` and `components/DocumentPage.tsx` | Account/route composition and document loading, offline, and recovery UI |
 | `apps/web/src/session/useDocumentSession.ts` | Stable React session ownership, subscription, and cleanup |
 | `apps/web/src/session/useRecoveryDownload.ts` | Recovery file download and actionable download errors |
 | `apps/web/src/theme.ts` and `theme.css` | System/user appearance preference and shared light/dark color tokens |
-| `apps/web/src/editor` | Tiptap/ProseMirror schema, Yjs bindings, keyboard behavior, block IDs |
+| `apps/web/src/editor` | Tiptap/ProseMirror schema, Yjs bindings, keyboard behavior, block IDs, participant cursor plugins and caret geometry |
 | `apps/web/src/session/local-store.ts` | Typed `idb` transactions for account/page history and the durable outbound journal |
 | `apps/web/src/session/index.ts` | Hydration, local persistence, pending batches, truthful state and recovery |
-| `apps/web/src/account` | Account lifetime, sign-in, private note list and guarded navigation |
+| `apps/web/src/account` | Account lifetime, sign-in, note list and workspace composition; `useWorkspaceExit` owns guarded departure/recovery, with focused leave/recovery views |
+| `apps/web/src/sharing` | Explicit join routes and account-bound requests; dialog-scoped invitation/mutation state, confirmation copy and modal focus handling |
 | `apps/web/src/session/sync-client.ts` | Authorized page handshake, WebSocket transport, ordered messages and reconnection |
 | `apps/server/src/app.ts` | Same-origin server wiring, static assets, connection admission and shutdown |
+| `apps/server/src/auth-routes.ts` and `account-routes.ts` | Request identity validation, auth forwarding/revalidation and account/page HTTP handlers |
 | `apps/server/src/auth.ts` and `pages.ts` | Better Auth/email integration, session locks, private page creation and access |
+| `apps/server/src/sharing-routes.ts` and `sharing.ts` | Authorized queued sharing actions, locked owner/grant/invitation checks and membership transactions |
 | `apps/server/src/sync-connection.ts` | Socket lifetime, handshake and incoming message validation |
 | `apps/server/src/sync-room.ts` | Page rooms, serialized commit/application, propagation and recovery |
 | `apps/server/src/sync-protocol.ts` | Bounded outgoing messages and protocol error mapping |
+| `apps/server/src/presence.ts` | Transient frame validation, authenticated identity, client-ID ownership, rate bounds and awareness lifetime |
 | `apps/server/src/queue.ts` | Bounded per-page sequencing and shutdown admission |
 | `apps/server/src/persistence.ts` | Page access locks, document loading, transactions and receipts |
 | `apps/server/src/schema.ts` | Drizzle table definitions and binary column types |
@@ -147,11 +151,11 @@ The [GitHub Actions workflow](.github/workflows/quality.yml) runs code quality, 
 - Queues admit at most 64 operations/8 MiB per page and 256 operations/32 MiB globally, including running work. At most 128 sockets; each socket has a 4 MiB outbound budget. Overload leaves uncommitted edits pending.
 - PostgreSQL applies 5-second statement, 2-second lock, and 15-second transaction limits. Queue ownership stays with an operation until completion/rollback. Shutdown stops admission, rejects queued work, and waits for active operations; a network blackhole can still delay shutdown. No deployment deadline or production availability target is claimed.
 - Binary recovery export has no import UI yet. The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; backups and hosted restoration remain deferred until before valuable notes. No performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
-- The Docker image serves the production bundle. Hosted HTTPS and startup are verified; real email delivery and authenticated hosted editing remain unverified. The editor bundle produces Vite's large-chunk advisory.
+- The Docker image serves the production bundle. Hosted private-account login, editing/isolation and logout recovery have dated evidence; natural session renewal/expiry and hosted sharing remain unverified. The editor bundle produces Vite's large-chunk advisory.
 
-The next release gates are real hosted email login and authenticated editing/synchronization, tested hosted backups before valuable notes, and hosted invitations/collaboration. Page deletion awaits its retention/recovery policy. The locally verified sharing slice does not establish hosted sharing or complete v1 readiness.
+The next release gates are hosted renewal/expiry, shared-page rollout and two-account hosted collaboration, and tested hosted backups before valuable notes. Page deletion awaits its retention/recovery policy. The locally verified sharing slice does not establish hosted sharing or complete v1 readiness.
 
-The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, with scheduled backups deferred for disposable test notes. Tested backups and restoration are required before valuable notes. The local checks provisioned no paid infrastructure. Railway setup was subsequently authorized on 2026-10-02; the hosted PostgreSQL migration, restricted-runtime DDL denial, application startup, and HTTPS/access smoke checks have passed. Real email login and hosted authenticated editing remain unverified. See [deployment](docs/deployment.md) for remaining setup and recovery limits.
+The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, with scheduled backups deferred for disposable test notes. Tested backups and restoration are required before valuable notes. The recorded private-account deployment and verification do not include the later shared-page migration/assets. See [deployment](docs/deployment.md) for rollout and recovery limits.
 
 ## License
 
