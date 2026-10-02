@@ -54,8 +54,9 @@ describe.skipIf(!databaseUrl)('magic-link accounts and private notes on PostgreS
     expect(redeemed.statusCode).toBe(302);
     const setCookie = redeemed.headers['set-cookie'];
     const cookie = (Array.isArray(setCookie) ? setCookie : [setCookie]).filter(Boolean).map(value => String(value).split(';')[0]).join('; ');
-    expect(String(setCookie)).toContain('HttpOnly');
-    expect(String(setCookie)).toContain('SameSite=Lax');
+    // A failed attribute check must not print the session cookie value in CI.
+    expect(String(setCookie).includes('HttpOnly')).toBe(true);
+    expect(String(setCookie).includes('SameSite=Lax')).toBe(true);
     const active = await app.inject({ url: '/api/session', headers: { cookie } });
     expect(active.statusCode).toBe(200);
     const accountId = active.json().accountId as string;

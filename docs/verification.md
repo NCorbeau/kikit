@@ -131,3 +131,41 @@ Real sender-domain delivery, magic-link login and secure cookies through the hos
 The user chose to defer scheduled backups and the hosted restore drill for disposable test notes. Neither has been completed. Tested hosted recovery is required before valuable notes; this first deployment establishes no hosted recovery, availability, capacity, or latency guarantee.
 
 The Notion planning summaries still describe accounts as unfinished and deployment as future work. Their status has not been changed during this deployment check; the repository evidence above is current.
+
+## 2026-10-02: MAC-100 continuous integration
+
+Added the `Quality checks` workflow for pull requests targeting `main`, pushes to `main`, and manual dispatch. Four isolated jobs run the actual typecheck/build/unit commands, PostgreSQL integration/restore, 18 fixture browser scenarios, and two authenticated production-build browser scenarios. [CI documentation](ci.md) records services, triggers, data isolation, and artifact handling.
+
+Executed locally on macOS/Apple Silicon with Node 24.21.0, pnpm 12.5.1, Docker PostgreSQL 17.9, and Playwright 1.63.0 Chromium for this change:
+
+- Frozen installation, typecheck, and build passed. The existing Vite large-chunk advisory remains.
+- 41 fast tests passed; the 20 PostgreSQL tests were intentionally skipped in that suite. Two new tests verify credential omission from errors/output/attachments and safe diagnostics when collection fails before tests start.
+- All 20 opted-in PostgreSQL integration tests and the disposable restore/restricted-role drill passed with `CI=true`.
+- All 18 fixture and two authenticated browser scenarios passed with `CI=true`, using the new reporter and separate output directories. Account tracing was disabled; email stayed captured in-process.
+- actionlint 1.7.12 accepted the workflow. Action references were resolved to commit SHAs from their upstream release tags.
+
+### Hosted failure and artifact drill
+
+[Actions run 37016917906](https://github.com/NCorbeau/kikit/actions/runs/37016917906) exercised commit `d5b4695` on the proposed merge for [PR 4](https://github.com/NCorbeau/kikit/pull/4), using Ubuntu 24.04, Node 24.21.0, PostgreSQL 17.9, and Playwright 1.63.0 Chromium. Code quality and PostgreSQL integration/restore passed. Two temporary assertions deliberately failed the independent-browser fixture scenario and the authenticated multi-device scenario; the other 17 fixture scenarios and the second account scenario passed. Both browser commands returned failure, artifact uploads succeeded, and database cleanup succeeded.
+
+Downloaded both uploaded archives and verified their published SHA-256 digests and file allowlists. Fixture diagnostics contained a failed summary, two browser screenshots, and one trace. Account diagnostics contained a failed summary and three browser screenshots, with no trace. Inspected screenshots, the account job log, both summaries, and fixture trace streams: the account assertion's synthetic magic-link URL/session credentials were not published. Archives contained no recovery exports, dumps, or raw error-context files. Seven-day expiration was returned by GitHub.
+
+An earlier hosted drill, [run 37016360196](https://github.com/NCorbeau/kikit/actions/runs/37016360196), verified the same boundary before refreshing two action pins to their current Node 24 runtimes. The new runtime pins passed the repeated upload/drain drill without the older Node 20 runtime warning.
+
+The temporary failure assertions have been removed. After adding the collection-failure reporter regression, typecheck, the 41-test fast suite, actionlint, and representative fixture/account browser scenarios passed locally again.
+
+### Restore cleanup correction
+
+The first clean hosted run, [37017479506](https://github.com/NCorbeau/kikit/actions/runs/37017479506), passed code quality, all 20 PostgreSQL integration tests, and both complete browser suites. Its restore assertions passed, but an idle pool emitted an unhandled PostgreSQL termination error during database cleanup. The failure dumped a disposable client's connection details; the isolated CI database/volume were removed, and that run's log was deleted. No production credentials or notes were supplied to the run.
+
+The restore harness now handles pool errors with static diagnostics, waits for actual client disconnect events after pool draining, removes databases without forced termination, and reports success only after cleanup completes. A regression runs the command with an injected secret-bearing driver error before any database connection and verifies exit code 1 without the secret in output. Typecheck and the resulting 42-test fast suite passed locally; the real restore/restricted-role drill passed three consecutive local runs.
+
+### Successful clean hosted run
+
+[Actions run 37018439030](https://github.com/NCorbeau/kikit/actions/runs/37018439030) passed all four jobs on the proposed merge for PR 4 at code commit `7157669`: frozen install, typecheck, build, 42 fast tests (20 database tests skipped there), all 20 opted-in PostgreSQL tests, the corrected restore/restricted-role drill, all 18 fixture browser scenarios, and both authenticated production-build browser scenarios. All database cleanup steps passed. The browser jobs used one worker without retries; the existing Vite large-chunk advisory remains. This establishes working hosted CI for the proposed change, with separate recorded failure-upload evidence above.
+
+Merge/default-branch execution and repository rulesets requiring these checks remain separate evidence; this PR does not deploy the application or complete other v1 gates.
+
+### Restore drill readability refactor · 2026-10-02
+
+Extracted named setup, sign-in, page creation, restored-session/page verification, and cleanup functions in `scripts/verify-backup-restore.ts`. Session and committed-page data have explicit types; the scenario retains every restore assertion, static failure diagnostics, and client-disconnect ordering. `pnpm typecheck`, `pnpm exec vitest run scripts/verify-backup-restore.test.ts` (one failure-diagnostic regression), and `pnpm test:restore` passed locally against the existing PostgreSQL 17.9 Compose service. These are checks for the refactor; the full hosted suite above was recorded before it.

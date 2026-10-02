@@ -1,0 +1,113 @@
+name: Quality checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+
+jobs:
+  quality:
+    name: Code quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.21.0'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm test
+
+  database:
+    name: PostgreSQL integration and restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.21.0'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:up
+      - run: pnpm test:integration
+      - run: pnpm test:restore
+      - name: Remove disposable database
+        if: always()
+        run: docker compose down --volumes
+
+  browsers:
+    name: Browsers (${{ matrix.suite }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [fixture, accounts]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.21.0'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm db:up
+      - name: Run independent-browser scenarios
+        id: tests
+        env:
+          KIKIT_CI_SUITE: ${{ matrix.suite }}
+        run: |
+          case "$KIKIT_CI_SUITE" in
+            fixture) pnpm test:e2e ;;
+            accounts) pnpm test:e2e:accounts ;;
+            *) exit 1 ;;
+          esac
+      - name: Retain fixture failure diagnostics
+        if: failure() && steps.tests.outcome == 'failure' && matrix.suite == 'fixture'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: browser-failure-fixture
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            test-results/fixture/summary.json
+            test-results/fixture/**/*.png
+            test-results/fixture/**/trace.zip
+      - name: Retain account failure diagnostics without auth traces
+        if: failure() && steps.tests.outcome == 'failure' && matrix.suite == 'accounts'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: browser-failure-accounts
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            test-results/accounts/summary.json
+            test-results/accounts/**/*.png
+      - name: Remove disposable database
+        if: always()
+        run: docker compose down --volumes
