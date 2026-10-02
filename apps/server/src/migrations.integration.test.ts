@@ -14,6 +14,7 @@ import { commitUpdate, loadPage } from './persistence.js';
 
 const databaseUrl = process.env.KIKIT_TEST_DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL('../migrations/', import.meta.url));
+const migrationCount = JSON.parse(await readFile(join(migrationsFolder, 'meta/_journal.json'), 'utf8')).entries.length;
 
 // Each case owns a temporary schema. Neither development notes nor public test
 // fixtures are reset by this suite.
@@ -61,7 +62,7 @@ describe.skipIf(!databaseUrl)('SQL migrations on PostgreSQL', () => {
   it('migrates concurrently and repeatedly, while keeping the seed explicit and idempotent', async () => {
     await Promise.all([migrateDatabase(pool), migrateDatabase(pool)]);
     await migrateDatabase(pool);
-    expect((await pool.query('SELECT count(*)::int AS count FROM __drizzle_migrations')).rows[0].count).toBe(2);
+    expect((await pool.query('SELECT count(*)::int AS count FROM __drizzle_migrations')).rows[0].count).toBe(migrationCount);
     expect((await pool.query('SELECT count(*)::int AS count FROM pages')).rows[0].count).toBe(0);
     await seedDevelopmentPage(pool);
     const original = (await pool.query('SELECT initial_state FROM pages')).rows[0].initial_state;
@@ -100,7 +101,7 @@ describe.skipIf(!databaseUrl)('SQL migrations on PostgreSQL', () => {
     await Promise.all([migrateDatabase(pool, temporaryFolder), migrateDatabase(pool, temporaryFolder)]);
     await migrateDatabase(pool, temporaryFolder);
     expect((await pool.query('SELECT id FROM migration_probe')).rows).toEqual([{ id: 1 }]);
-    expect((await pool.query('SELECT count(*)::int AS count FROM __drizzle_migrations')).rows[0].count).toBe(3);
+    expect((await pool.query('SELECT count(*)::int AS count FROM __drizzle_migrations')).rows[0].count).toBe(migrationCount + 1);
   });
 
   it('rolls back failed DDL and leaves that migration unrecorded', async () => {
@@ -108,7 +109,7 @@ describe.skipIf(!databaseUrl)('SQL migrations on PostgreSQL', () => {
     await addMigration('failed');
     await expect(migrateDatabase(pool, temporaryFolder)).rejects.toThrow();
     expect((await pool.query("SELECT to_regclass('migration_probe') AS table")).rows[0].table).toBeNull();
-    expect((await pool.query('SELECT count(*)::int AS count FROM __drizzle_migrations')).rows[0].count).toBe(2);
+    expect((await pool.query('SELECT count(*)::int AS count FROM __drizzle_migrations')).rows[0].count).toBe(migrationCount);
   });
 
   it('rejects changed applied SQL and missing history instead of silently skipping it', async () => {

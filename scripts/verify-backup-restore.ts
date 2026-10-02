@@ -9,10 +9,11 @@ import * as Y from 'yjs';
 import { createServer } from '../apps/server/src/app.js';
 import { migrateDatabase } from '../apps/server/src/migrations.js';
 import { commitUpdate, loadPage } from '../apps/server/src/persistence.js';
+import { findInvitationPage, getSharing, replaceInvitation } from '../apps/server/src/sharing.js';
 
 type App = Awaited<ReturnType<typeof createServer>>;
 type AccountSession = { accountId: string; sessionId: string; cookie: string };
-type CommittedPage = { pageId: string; batchId: string; update: Uint8Array; sequence: number };
+type CommittedPage = { pageId: string; batchId: string; update: Uint8Array; sequence: number; invitationToken: string };
 
 // This drill only touches uniquely named disposable databases in local Compose.
 // It never reads DATABASE_URL or any production credentials.
@@ -96,7 +97,7 @@ async function prepareSourceDatabase(pool: pg.Pool) {
     GRANT USAGE ON SCHEMA public TO "${runtimeRole}";
     GRANT SELECT ON schema_versions TO "${runtimeRole}";
     GRANT SELECT, INSERT, UPDATE, DELETE ON auth_user, auth_session, auth_account, auth_verification,
-      pages, page_grants, document_updates, receipts TO "${runtimeRole}";
+      pages, page_grants, page_invitations, document_updates, receipts TO "${runtimeRole}";
   `);
 }
 
@@ -152,7 +153,8 @@ async function createCommittedPage(server: App, pool: pg.Pool, session: AccountS
     projectTitle: () => title,
   });
   assert.equal(receipt.sequence, 1);
-  return { pageId, batchId, update, sequence: receipt.sequence };
+  const invitation = await replaceInvitation(pool, pageId, { accountId, sessionId });
+  return { pageId, batchId, update, sequence: receipt.sequence, invitationToken: invitation.token };
 }
 
 async function verifyRestoredSession(server: App, session: AccountSession) {
@@ -163,6 +165,8 @@ async function verifyRestoredSession(server: App, session: AccountSession) {
 async function verifyRestoredPage(pool: pg.Pool, session: AccountSession, page: CommittedPage) {
   const { accountId, sessionId } = session;
   const { pageId, batchId, update, sequence } = page;
+  assert.equal(await findInvitationPage(pool, page.invitationToken), pageId);
+  assert.equal((await getSharing(pool, pageId, { accountId, sessionId })).invitationActive, true);
   const duplicate = await commitUpdate(pool, pageId, accountId, batchId, update, { sessionId });
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.sequence, sequence);
@@ -181,7 +185,7 @@ async function verifyRestoredPage(pool: pg.Pool, session: AccountSession, page: 
 async function fingerprint(pool: pg.Pool) {
   const tables = [
     'auth_user', 'auth_session', 'auth_account', 'auth_verification',
-    'pages', 'page_grants', 'document_updates', 'receipts',
+    'pages', 'page_grants', 'page_invitations', 'document_updates', 'receipts',
     'schema_versions', '__drizzle_migrations',
   ];
   const contents: [table: string, hash: string][] = [];
@@ -247,7 +251,7 @@ async function cleanup() {
 try {
   await verifyRestore();
   if (!process.exitCode) {
-    console.log('Local backup restore passed: account/session, exact binary records and receipt identity, continued writes, and runtime DDL denial.');
+    console.log('Local backup restore passed: account/session/invitation, exact binary records and receipt identity, continued writes, and runtime DDL denial.');
   }
 } catch {
   // Driver/assertion errors may contain cookies, passwords, or note records.

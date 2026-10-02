@@ -18,6 +18,13 @@ export async function lockSession(db: NodePgDatabase, principal: Principal): Pro
   if (!active) throw new AccessError('Session expired or revoked');
 }
 
+/** All page transactions lock session -> page -> grants/invitation in this order. */
+export async function lockPage(db: NodePgDatabase, pageId: string) {
+  const [page] = await db.select().from(pages).where(eq(pages.id, pageId)).for('update');
+  if (!page) throw new AccessError('Page access denied');
+  return page;
+}
+
 export async function canAccessPage(pool: pg.Pool, pageId: string, principal: Principal): Promise<boolean> {
   const db = drizzle(pool);
   const query = db.select({ id: pages.id }).from(pages).innerJoin(pageGrants, and(
@@ -31,7 +38,7 @@ export async function canAccessPage(pool: pg.Pool, pageId: string, principal: Pr
 }
 
 export async function listPages(pool: pg.Pool, accountId: string): Promise<PageSummary[]> {
-  const rows = await drizzle(pool).select({ id: pages.id, title: pages.title, createdAt: pages.createdAt })
+  const rows = await drizzle(pool).select({ id: pages.id, title: pages.title, createdAt: pages.createdAt, role: pageGrants.role })
     .from(pages).innerJoin(pageGrants, and(eq(pageGrants.pageId, pages.id), eq(pageGrants.accountId, accountId)))
     .orderBy(asc(pages.createdAt));
   return rows.map(row => ({ ...row, createdAt: row.createdAt.toISOString() }));
@@ -56,7 +63,7 @@ export async function createPage(pool: pg.Pool, id: string, principal: Principal
     }
     const [page] = await db.select({ id: pages.id, title: pages.title, createdAt: pages.createdAt }).from(pages).where(eq(pages.id, id));
     await client.query('COMMIT');
-    return { ...page, createdAt: page.createdAt.toISOString() };
+    return { ...page, createdAt: page.createdAt.toISOString(), role: 'owner' };
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch { discard = true; }
     throw error;

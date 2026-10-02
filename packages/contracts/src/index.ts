@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const PROTOCOL_VERSION = 1;
 export const DOCUMENT_SCHEMA_VERSION = 1;
-export const DATABASE_SCHEMA_VERSION = 2;
+export const DATABASE_SCHEMA_VERSION = 3;
 export const DEV_ACCOUNT_ID = 'dev-writer';
 export const DEV_PAGE_ID = '00000000-0000-4000-8000-000000000001';
 export const TITLE_FRAGMENT = 'title';
@@ -66,10 +66,21 @@ export interface DevSession {
   schemaVersion: number;
 }
 
-export interface PageSummary { id: string; title: string; createdAt: string }
+export type PageRole = 'owner' | 'editor';
+// Older account hints have no role. They never authorize sharing controls.
+export interface PageSummary { id: string; title: string; createdAt: string; role?: PageRole }
 export interface WorkspaceSession { accountId: string; email: string; fixture: boolean }
 export const workspaceAccountSchema = z.object({ accountId: z.string().min(1), email: z.string(), fixture: z.boolean() });
-export const pageSummarySchema = z.object({ id: z.string().uuid(), title: z.string(), createdAt: z.string() });
+export const pageRoleSchema = z.enum(['owner', 'editor']);
+export const pageSummarySchema = z.object({ id: z.string().uuid(), title: z.string(), createdAt: z.string(), role: pageRoleSchema.optional() });
+export const invitationTokenSchema = z.string().length(43).regex(/^[A-Za-z0-9_-]{43}$/);
+export const joinInvitationSchema = z.object({ token: invitationTokenSchema }).strict();
+export const invitationSchema = z.object({ token: invitationTokenSchema });
+export const sharingStateSchema = z.object({
+  invitationActive: z.boolean(),
+  members: z.array(z.object({ accountId: z.string().min(1), name: z.string(), email: z.string(), role: pageRoleSchema })),
+});
+export type SharingState = z.infer<typeof sharingStateSchema>;
 export const workspaceSchema = z.object({ account: workspaceAccountSchema.nullable(), pages: z.array(pageSummarySchema) });
 export const pageSessionSchema = z.object({
   accountId: z.string().min(1), pageId: z.string().uuid(),

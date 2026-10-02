@@ -40,6 +40,23 @@ export class SyncRooms {
 
   get size(): number { return this.rooms.size; }
 
+  /** Membership changes share ordering with admitted joins, writes and broadcasts. */
+  accessMutation<T>(pageId: string, task: () => Promise<T>): Promise<T> {
+    return this.queues.run(pageId, 0, async () => {
+      try {
+        const result = await task();
+        const room = this.rooms.get(pageId);
+        if (room) await this.pruneUnauthorized(pageId, room);
+        return result;
+      } catch (error) {
+        // Even a rejected COMMIT response can hide a committed removal. Fail closed
+        // before releasing page serialization; reconnect rechecks stored grants.
+        if (!isRejectedUpdate(error)) this.invalidate(pageId);
+        throw error;
+      }
+    });
+  }
+
   join(pageId: string, socket: WebSocket, principal: Principal = { accountId: DEV_ACCOUNT_ID }): Promise<void> {
     this.principals.set(socket, principal);
     return this.queues.run(pageId, 0, async () => {

@@ -61,6 +61,18 @@ export const pageGrants = pgTable('page_grants', {
   check('page_grants_role_check', sql`${table.role} IN ('owner', 'editor')`),
 ]);
 
+// Only the current invitation hash is retained. Replacement invalidates the old
+// link without changing any grants; the plaintext secret is returned once.
+export const pageInvitations = pgTable('page_invitations', {
+  pageId: uuid('page_id').primaryKey(),
+  tokenHash: text('token_hash').notNull().unique(),
+  disabled: boolean('disabled').notNull().default(false),
+  createdAt: createdAt(),
+}, table => [
+  foreignKey({ name: 'page_invitations_page_id_fkey', columns: [table.pageId], foreignColumns: [pages.id] }),
+  check('page_invitations_hash_check', sql`${table.tokenHash} ~ '^[0-9a-f]{64}$'`),
+]);
+
 export const documentUpdates = pgTable('document_updates', {
   pageId: uuid('page_id').notNull(),
   sequence: bigint('sequence', { mode: 'number' }).notNull(),

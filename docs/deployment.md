@@ -51,7 +51,7 @@ GRANT USAGE ON SCHEMA public TO kikit_runtime;
 GRANT SELECT ON schema_versions TO kikit_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   auth_user, auth_session, auth_account, auth_verification,
-  pages, page_grants, document_updates, receipts
+  pages, page_grants, page_invitations, document_updates, receipts
 TO kikit_runtime;
 ```
 
