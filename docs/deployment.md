@@ -67,7 +67,7 @@ Drain has no timeout that releases a still-running transaction. A database netwo
 
 ## Backups and restore
 
-Enable daily backups on the PostgreSQL volume. Railway currently retains daily backups for six days; backup storage is billed incrementally. With a healthy daily schedule, the initial recovery expectation is roughly up to 24 hours of server data loss. Missed backups can increase that window. No restoration time guarantee is set. [Railway backup behavior](https://docs.railway.com/volumes/backups).
+On 2026-10-02 the user chose to deploy first for disposable test notes and defer scheduled backups and the hosted restore drill. This deployment therefore has no tested hosted recovery guarantee. Before storing valuable notes, enable backups and complete the restore drill below. The proposed initial schedule is daily backups on the PostgreSQL volume. Railway currently retains daily backups for six days; backup storage is billed incrementally. With a healthy daily schedule, the initial recovery expectation is roughly up to 24 hours of server data loss. Missed backups can increase that window. No restoration time guarantee is set. [Railway backup behavior](https://docs.railway.com/volumes/backups).
 
 Before valuable notes, run a hosted restore drill with synthetic data:
 

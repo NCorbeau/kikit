@@ -141,7 +141,7 @@ Test fault/metrics routes only exist with `NODE_ENV=test` **and** `KIKIT_TEST_FA
 
 The next release gates are actual Railway/email/backup verification, followed by invitations and collaboration with two distinct authenticated accounts. The private account slice does not satisfy the shared-page v1 gate.
 
-The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, and daily backups. The local checks provisioned no paid infrastructure. Railway setup was subsequently authorized on 2026-10-02; the hosted PostgreSQL migration and restricted-runtime DDL denial have passed, while app/email/backup verification is in progress. See [deployment](docs/deployment.md) for remaining setup and recovery limits.
+The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, with scheduled backups deferred for disposable test notes. Tested backups and restoration are required before valuable notes. The local checks provisioned no paid infrastructure. Railway setup was subsequently authorized on 2026-10-02; the hosted PostgreSQL migration and restricted-runtime DDL denial have passed, while app/email/backup verification is in progress. See [deployment](docs/deployment.md) for remaining setup and recovery limits.
 
 ## License
 
