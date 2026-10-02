@@ -102,6 +102,27 @@ Inspected production-build sign-in, desktop editor, and 320px editor screenshots
 These checks establish the private account slice locally. Real Resend/DNS delivery, hosted HTTPS/proxy/cookie behavior, Railway runtime privileges, scheduled daily backups and volume restore remain unverified. The Docker runtime smoke used a synthetic HTTPS origin with local HTTP requests and sent no email. No Railway configuration, cloud database, public exposure, or paid infrastructure was changed. Invitations, shared membership controls, compaction, recovery import, and the full authenticated collaboration release gate remain deferred.
 
 
+## 2026-10-02: shared-page access and invitation UI
+
+Executed in an isolated worktree with the same local Node, pnpm, PostgreSQL and Chromium versions as the private-account checks above. These results cover authenticated invitation redemption and membership controls; presence is a subsequent slice.
+
+| Check | Result |
+| --- | --- |
+| `pnpm typecheck` | Passed |
+| Fast Vitest checks, excluding the subsequent presence slice | 45 passed; 30 opt-in PostgreSQL tests skipped |
+| `pnpm test:integration` | 30 passed: 7 accounts, 7 persistence/WebSocket, 6 migrations, 10 sharing |
+| `pnpm test:e2e:accounts` | 7 passed: 2 account scenarios and 5 sharing scenarios against the production Vite build |
+| `COMPOSE_PROJECT_NAME=kikit pnpm test:restore` | Passed, including invitation records and restored hash lookup |
+| `pnpm build` | Passed; Vite reported its existing large-chunk advisory |
+
+The PostgreSQL sharing checks cover hashed, explicit and idempotent joins; private-page denial; editor and owner permissions; replacement/disable semantics; active socket revocation; denial of duplicate receipts after removal; explicit rejoin and receipt recovery; redemption/invalidation and handshake/removal ordering; real row-lock write/removal races; expiry; and uncertain membership mutation outcomes. An account-switch regression rejects a mismatched mounted account before creating any grant.
+
+The sharing browser scenarios use distinct Better Auth accounts and independent contexts. They decode actual QR pixels and compare the result with the invitation URL, keep invitation secrets out of login callback URLs, require an explicit join, converge edits and list joined notes on another device. They exercise replaced/disabled links, active and offline-reload revocation, retained binary recovery with stable pending identities, failed IndexedDB writes and export-before-navigation, Escape cancellation, and a cookie account switch before joining. The account and sharing Playwright projects run serially with fresh workers so Better Auth's enabled in-memory login limiter does not leak between suites; the tests do not intercept authentication requests.
+
+The restore drill now populates and compares `page_invitations` as well as the account and durable document records. A restored invitation can be found by its hash, and disabled state is retained. Runtime DDL denial and continued writes still pass. The first worktree run could not find the Compose service under its default project name; the recorded successful run explicitly selected the existing local `kikit` project.
+
+These checks establish local authenticated shared-page access. They do not verify hosted email delivery or the Railway collaboration gate. Presence, page deletion policy, hosted sharing, scheduled backups and recovery import remain outside this checkpoint. No Railway deployment or configuration was changed.
+
 ## 2026-10-02: Railway setup in progress
 
 The user authorized provisioning and deployment, selecting a $5/month Kikit resource-usage target and a $20 workspace compute hard limit. Railway CLI 5.63.1 was installed and authenticated. The workspace limit was applied and read back as $20; project dollar caps are unavailable. Application autodeployment was disabled to preserve the stop/drain procedure.
