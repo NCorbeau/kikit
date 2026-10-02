@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -50,7 +50,8 @@ async function fingerprint(pool: pg.Pool) {
   const contents: unknown[] = [];
   for (const table of tables) {
     const result = await pool.query(`SELECT row_to_json(t)::text AS row FROM "${table}" t ORDER BY row_to_json(t)::text`);
-    contents.push([table, result.rows]);
+    // Compare exact rows without exposing session tokens or note bytes on failure.
+    contents.push([table, createHash('sha256').update(JSON.stringify(result.rows)).digest('hex')]);
   }
   return contents;
 }

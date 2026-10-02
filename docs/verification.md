@@ -131,3 +131,17 @@ Real sender-domain delivery, magic-link login and secure cookies through the hos
 The user chose to defer scheduled backups and the hosted restore drill for disposable test notes. Neither has been completed. Tested hosted recovery is required before valuable notes; this first deployment establishes no hosted recovery, availability, capacity, or latency guarantee.
 
 The Notion planning summaries still describe accounts as unfinished and deployment as future work. Their status has not been changed during this deployment check; the repository evidence above is current.
+
+## 2026-10-02: MAC-100 continuous integration
+
+Added the `Quality checks` workflow for pull requests targeting `main`, pushes to `main`, and manual dispatch. Four isolated jobs run the actual typecheck/build/unit commands, PostgreSQL integration/restore, 18 fixture browser scenarios, and two authenticated production-build browser scenarios. [CI documentation](ci.md) records services, triggers, data isolation, and artifact handling.
+
+Executed locally on macOS/Apple Silicon with Node 24.21.0, pnpm 12.5.1, Docker PostgreSQL 17.9, and Playwright 1.63.0 Chromium for this change:
+
+- Frozen installation, typecheck, and build passed. The existing Vite large-chunk advisory remains.
+- 40 fast tests passed; the 20 PostgreSQL tests were intentionally skipped in that suite. The new test verifies that CI browser diagnostics omit credentials from errors, stdout/stderr, and arbitrary attachments.
+- All 20 opted-in PostgreSQL integration tests and the disposable restore/restricted-role drill passed with `CI=true`.
+- All 18 fixture and two authenticated browser scenarios passed with `CI=true`, using the new reporter and separate output directories. Account tracing was disabled; email stayed captured in-process.
+- actionlint 1.7.12 accepted the workflow. Action references were resolved to commit SHAs from their upstream release tags.
+
+GitHub-hosted execution and deliberate failure/artifact drills are pending at this checkpoint. These local checks do not prove an Actions run or a merged default-branch workflow; MAC-100 remains in progress until those checks are recorded.

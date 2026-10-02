@@ -127,7 +127,9 @@ Run `pnpm db:up` before the integration/browser suites. They use a separate loca
 
 `pnpm test` runs fast Vitest checks; PostgreSQL integration tests are explicitly skipped there. `pnpm test:integration` opts into the real database checks. Browser coverage includes concurrent edits, offline reload/reconnect, duplicate IDs, lost acknowledgements, uncertain COMMIT outcomes, restart, a real PostgreSQL write-failure trigger, keyboard split/merge, paste IDs, collaborative undo, composition events and access/version/origin denial. These tests use the real backend and PostgreSQL, without substituting browser-local message passing.
 
-Test fault/metrics routes only exist with `NODE_ENV=test` **and** `KIKIT_TEST_FAULTS=1`, and require loopback. They are absent from development routes. Failure screenshots and traces go to ignored `test-results/`.
+Test fault/metrics routes only exist with `NODE_ENV=test` **and** `KIKIT_TEST_FAULTS=1`, and require loopback. They are absent from development routes. Failure screenshots and traces go to ignored `test-results/fixture/` and `test-results/accounts/`.
+
+The [GitHub Actions workflow](.github/workflows/quality.yml) runs code quality, PostgreSQL integration/restore, and separate fixture/account browser checks for pull requests and `main`. CI uses disposable databases and synthetic notes. Failed browser runs retain summaries/screenshots for seven days; only fixture runs upload traces, keeping account login URLs and cookies out of artifacts. See [CI behavior and diagnostics](docs/ci.md) and [dated verification](docs/verification.md).
 
 ## Current limits and next milestone
 

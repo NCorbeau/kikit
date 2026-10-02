@@ -5,6 +5,9 @@ export default defineConfig({
   testIgnore: 'accounts.spec.ts',
   fullyParallel: false,
   workers: 1,
+  forbidOnly: !!process.env.CI,
+  outputDir: './test-results/fixture',
+  reporter: process.env.CI ? './scripts/ci-browser-reporter.ts' : 'list',
   timeout: 45_000,
   expect: { timeout: 12_000 },
   use: {
