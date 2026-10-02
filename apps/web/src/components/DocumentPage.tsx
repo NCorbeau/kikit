@@ -5,6 +5,7 @@ import { PageEditor } from '../editor/PageEditor';
 import { AppHeader } from './AppHeader';
 import { DownloadIcon } from './Icons';
 import { SaveStatus, hasSaveFailure } from './SaveStatus';
+import { Participants } from './Participants';
 
 export function DocumentPage({ session, snapshot, accountActions, onHome }: {
   session: DocumentSession;
@@ -18,7 +19,9 @@ export function DocumentPage({ session, snapshot, accountActions, onHome }: {
 
   return (
     <div className="app-shell">
-      <a href="#writing" className="skip-link">Skip to writing</a>
+      <a href="#writing" className="skip-link" onClick={event => {
+        event.preventDefault(); document.getElementById('writing')?.focus();
+      }}>Skip to writing</a>
       <AppHeader onHome={onHome}>
         {accountActions}
         <SaveStatus snapshot={snapshot} onRetry={retry} />
@@ -49,8 +52,9 @@ export function DocumentPage({ session, snapshot, accountActions, onHome }: {
               : 'Changes are saving on this device.'}</p>
           </div>
         )}
+        <Participants presence={session.presence} />
         {snapshot.ready
-          ? <PageEditor doc={session.doc} editable={snapshot.editable} />
+          ? <PageEditor doc={session.doc} awareness={session.presence.awareness} editable={snapshot.editable} />
           : <LoadingPage failed={failed} />}
       </main>
     </div>

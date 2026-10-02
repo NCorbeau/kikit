@@ -4,7 +4,7 @@
 
 Kikit is a small, local-first notes app built around a simple block editor. Its goal is to make writing feel immediate, keep your work safe through connection changes, and let people work together on the same page.
 
-**Status: shared-page access and UI implemented locally; private account slice deployed on Railway.** Email magic links, account-scoped notes, authenticated synchronization, and recovery across logout are implemented and verified locally. The production Docker image and migrated PostgreSQL database are running in Amsterdam. Live HTTPS, database health, anonymous-access denial, and origin checks passed on 2026-10-02. Real email login and authenticated hosted editing remain to be checked. Backups and hosted restore are deferred for disposable test notes. Invitation links/QR joins, owner-only controls, and active/offline revocation with recoverable drafts are verified locally. Presence/cursors remain the next slice; hosted sharing is unverified. This is not the complete v1 release.
+**Status: shared pages implemented locally; private account slice deployed on Railway.** Email magic links, account-scoped notes, authenticated synchronization, and recovery across logout are implemented and verified locally. The production Docker image and migrated PostgreSQL database are running in Amsterdam. Live HTTPS, database health, anonymous-access denial, and origin checks passed on 2026-10-02. Real email login and authenticated hosted editing remain to be checked. Backups and hosted restore are deferred for disposable test notes. Invitation links/QR joins, owner-only controls, active/offline revocation with recoverable drafts, and transient participants/cursors are implemented locally. Hosted sharing is unverified. This is not the complete v1 release.
 
 ![Typing in two independent Kikit windows, with edits synchronizing in both directions](docs/demos/live-sync.gif)
 
@@ -73,6 +73,8 @@ Owners can create an invitation from **Share**, copy its link or show its QR cod
 
 Links are shown only when generated because the server stores hashes. Later visits offer an explicit replacement. Invitations remain active until disabled/replaced. Login continuation stays in the initiating tab; if email opens elsewhere, reopen the invitation after signing in. Revoked access hides the editor while retaining drafts and binary recovery export. See [the sharing contract](docs/shared-pages-contract.md).
 
+Authorized collaborators appear above the document with colored cursors and selections in the title and body. Presence is transient: it does not create document updates, receipts, or save acknowledgements. Disconnecting, signing out, or removing membership clears it. Sharing uses database schema 3 and wire protocol 2; matching web/server versions must be deployed together.
+
 ## Development identity boundary
 
 The fixture has exactly one explicit local identity and seeded page. `pnpm dev` and `pnpm db:migrate` opt into it using `NODE_ENV=development KIKIT_DEV_FIXTURE=1`. Production refuses the fixture flag; without it, the server uses real account configuration. HTTP/WS fixture access is loopback-restricted and the WebSocket requires the configured Origin. The production frontend build refuses to initialize a fixture session.
@@ -140,14 +142,14 @@ The [GitHub Actions workflow](.github/workflows/quality.yml) runs code quality, 
 ## Current limits and next milestone
 
 - One active account server, private notes and authenticated shared pages. PostgreSQL does not coordinate in-memory rooms across replicas. An ownership lock rejects a second account server; deployments require stopping and draining the old instance first.
-- Plain text paragraphs/headings only: no marks, lists, attachments, presence, comments, drag reordering, or advanced blocks.
+- Plain text paragraphs/headings only: no marks, lists, attachments, comments, drag reordering, or advanced blocks.
 - Full-state handshakes and retained binary update histories; no snapshot compaction/pruning. Updates are limited to 256 KiB and committed documents to 2 MiB. These are guardrails, not measured capacity claims.
 - Queues admit at most 64 operations/8 MiB per page and 256 operations/32 MiB globally, including running work. At most 128 sockets; each socket has a 4 MiB outbound budget. Overload leaves uncommitted edits pending.
 - PostgreSQL applies 5-second statement, 2-second lock, and 15-second transaction limits. Queue ownership stays with an operation until completion/rollback. Shutdown stops admission, rejects queued work, and waits for active operations; a network blackhole can still delay shutdown. No deployment deadline or production availability target is claimed.
 - Binary recovery export has no import UI yet. The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; backups and hosted restoration remain deferred until before valuable notes. No performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
 - The Docker image serves the production bundle. Hosted HTTPS and startup are verified; real email delivery and authenticated hosted editing remain unverified. The editor bundle produces Vite's large-chunk advisory.
 
-The next release gates are real hosted email login and authenticated editing/synchronization, tested hosted backups before valuable notes, and hosted invitations/collaboration plus participant indicators/cursors. The locally verified sharing slice does not establish hosted sharing or complete v1 readiness.
+The next release gates are real hosted email login and authenticated editing/synchronization, tested hosted backups before valuable notes, and hosted invitations/collaboration. Page deletion awaits its retention/recovery policy. The locally verified sharing slice does not establish hosted sharing or complete v1 readiness.
 
 The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, with scheduled backups deferred for disposable test notes. Tested backups and restoration are required before valuable notes. The local checks provisioned no paid infrastructure. Railway setup was subsequently authorized on 2026-10-02; the hosted PostgreSQL migration, restricted-runtime DDL denial, application startup, and HTTPS/access smoke checks have passed. Real email login and hosted authenticated editing remain unverified. See [deployment](docs/deployment.md) for remaining setup and recovery limits.
 

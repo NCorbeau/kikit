@@ -26,6 +26,7 @@
     "qrcode": "^1.5.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "y-protocols": "1.0.7",
     "yjs": "13.6.33"
   },
   "devDependencies": {

@@ -2,7 +2,7 @@ import { test, expect, type Browser, type BrowserContext, type Page } from '@pla
 import jsQR from 'jsqr';
 import {
   AccountBrowserHarness, accountOrigin, appendBody, createNote, downloadRecovery,
-  pageBody, recoveryBody, serverSaved, type BrowserAccount,
+  pageBody, recoveryBody, serverSaved, expectDocumentContains, expectDocumentExcludes, type BrowserAccount,
 } from './account-support';
 
 const harness = new AccountBrowserHarness();
@@ -127,7 +127,7 @@ test('invitation QR/link, secret-free login continuation, explicit join, and two
   await expect(otherTab.getByRole('heading', { name: 'Open your invitation again' })).toBeVisible();
   await otherTab.close();
   await memberPage.getByRole('button', { name: 'Join note', exact: true }).click();
-  await expect(pageBody(memberPage)).toContainText('Shared starting point.');
+  await expectDocumentContains(pageBody(memberPage), 'Shared starting point.');
   await serverSaved(memberPage);
   expect(joinRequests).toBe(1);
   expect((await memberPage.request.get(`/api/pages/${privateId}/session`)).status()).toBe(403);
@@ -141,15 +141,15 @@ test('invitation QR/link, secret-free login continuation, explicit join, and two
   const device = await account(browser, email);
   expect(device.identity.accountId).toBe(identity.accountId);
   await device.page.getByRole('button', { name: 'Shared browser note' }).click();
-  await expect(pageBody(device.page)).toContainText('Shared starting point.');
+  await expectDocumentContains(pageBody(device.page), 'Shared starting point.');
   await Promise.all([appendBody(owner.page, ' Owner contribution.'), appendBody(memberPage, ' Member contribution.')]);
   for (const page of [owner.page, memberPage, device.page]) {
-    await expect(pageBody(page)).toContainText('Owner contribution.');
-    await expect(pageBody(page)).toContainText('Member contribution.');
+    await expectDocumentContains(pageBody(page), 'Owner contribution.');
+    await expectDocumentContains(pageBody(page), 'Member contribution.');
     await serverSaved(page);
   }
   await device.page.reload();
-  await expect(pageBody(device.page)).toContainText('Member contribution.');
+  await expectDocumentContains(pageBody(device.page), 'Member contribution.');
   await serverSaved(device.page);
 });
 
@@ -171,7 +171,7 @@ test('owner replacement/disable invalidates join links while existing editor mem
   await closeSharing(owner.page);
   await appendBody(member.page, ' Still authorized after replacement.');
   await serverSaved(member.page);
-  await expect(pageBody(owner.page)).toContainText('Still authorized after replacement.');
+  await expectDocumentContains(pageBody(owner.page), 'Still authorized after replacement.');
 
   await openInvitation(member.page, invitePath(original.token));
   await member.page.getByRole('button', { name: 'Join note', exact: true }).click();
@@ -191,10 +191,10 @@ test('owner replacement/disable invalidates join links while existing editor mem
   await member.page.getByRole('button', { name: 'Join note', exact: true }).click();
   await expect(member.page.getByRole('alert')).toContainText('invitation');
   await member.page.goto(`/#/page/${pageId}`);
-  await expect(pageBody(member.page)).toContainText('Still authorized after replacement.');
+  await expectDocumentContains(pageBody(member.page), 'Still authorized after replacement.');
   await appendBody(member.page, ' Still authorized after disable.');
   await serverSaved(member.page);
-  await expect(pageBody(owner.page)).toContainText('Still authorized after disable.');
+  await expectDocumentContains(pageBody(owner.page), 'Still authorized after disable.');
 });
 
 test('active and offline member removal preserves recovery and stable pending identities through valid rejoin', async ({ browser }) => {
@@ -209,8 +209,17 @@ test('active and offline member removal preserves recovery and stable pending id
   await device.context.setOffline(true);
   await appendBody(device.page, ' Offline draft retained after removal.');
   await expect(device.page.getByTestId('save-status')).toHaveText('Saved on this device');
+  await device.page.getByRole('button', { name: 'Notes', exact: true }).click();
+  const leave = device.page.getByRole('dialog', { name: 'Return to your notes?', exact: true });
+  await expect(leave).toBeVisible();
+  await device.page.keyboard.press('Escape');
+  await expect(leave).toHaveCount(0);
+  await expect(pageBody(device.page)).toHaveAttribute('contenteditable', 'true');
+  await appendBody(device.page, ' Still editable after cancelling navigation.');
+  await expect(device.page.getByTestId('save-status')).toHaveText('Saved on this device');
   await device.page.reload();
-  await expect(pageBody(device.page)).toContainText('Offline draft retained after removal.');
+  await expectDocumentContains(pageBody(device.page), 'Offline draft retained after removal.');
+  await expectDocumentContains(pageBody(device.page), 'Still editable after cancelling navigation.');
   await expect(device.page.getByTestId('save-status')).toHaveText('Saved on this device');
   const receiptsBefore = (await harness.pool.query('SELECT count(*)::int AS count FROM receipts WHERE page_id=$1', [pageId])).rows[0].count as number;
   await removeThroughUi(owner.page, member.identity);
@@ -224,15 +233,18 @@ test('active and offline member removal preserves recovery and stable pending id
   expect(recovery.accountId).toBe(member.identity.accountId);
   expect(recovery.pageId).toBe(pageId);
   expect(recoveryBody(recovery)).toContain('Offline draft retained after removal.');
+  expect(recoveryBody(recovery)).toContain('Still editable after cancelling navigation.');
   expect(recovery.pending.length).toBeGreaterThan(0);
   expect((await harness.pool.query('SELECT count(*)::int AS count FROM receipts WHERE page_id=$1', [pageId])).rows[0].count).toBe(receiptsBefore);
-  await expect(pageBody(owner.page)).not.toContainText('Offline draft retained after removal.');
+  await expectDocumentExcludes(pageBody(owner.page), 'Offline draft retained after removal.');
+  await expectDocumentExcludes(pageBody(owner.page), 'Still editable after cancelling navigation.');
   await device.page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(device.page.getByRole('heading', { name: 'Your notes' })).toBeVisible();
   await expect(device.page.getByRole('button', { name: 'Removal recovery' })).toHaveCount(0);
   await joinThroughUi(device.page, token);
-  await expect(pageBody(device.page)).toContainText('Offline draft retained after removal.');
-  await expect(pageBody(owner.page)).toContainText('Offline draft retained after removal.');
+  await expectDocumentContains(pageBody(device.page), 'Offline draft retained after removal.');
+  await expectDocumentContains(pageBody(owner.page), 'Offline draft retained after removal.');
+  await expectDocumentContains(pageBody(owner.page), 'Still editable after cancelling navigation.');
   await serverSaved(device.page);
   for (const pending of recovery.pending) {
     const receipt = await harness.pool.query('SELECT count(*)::int AS count FROM receipts WHERE page_id=$1 AND batch_id=$2', [pageId, pending.batchId]);
@@ -263,7 +275,7 @@ test('member removal hides an editor with failed device writes and requires deco
   await expect(guard.getByRole('button', { name: 'Open invitation', exact: true })).toBeDisabled();
   await member.page.keyboard.press('Escape');
   await expect(guard).toHaveCount(0);
-  await expect(pageBody(member.page)).toContainText('Unsaved in-memory shared draft.');
+  await expectDocumentContains(pageBody(member.page), 'Unsaved in-memory shared draft.');
   await removeThroughUi(owner.page, member.identity);
   // Failed local persistence keeps the paused transport closed; returning focus revalidates membership.
   await member.page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -276,7 +288,7 @@ test('member removal hides an editor with failed device writes and requires deco
   for (const pending of recovery.pending) {
     expect((await harness.pool.query('SELECT 1 FROM receipts WHERE page_id=$1 AND batch_id=$2', [pageId, pending.batchId])).rowCount).toBe(0);
   }
-  await expect(pageBody(owner.page)).not.toContainText('Unsaved in-memory shared draft.');
+  await expectDocumentExcludes(pageBody(owner.page), 'Unsaved in-memory shared draft.');
   await member.page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(member.page.getByRole('heading', { name: 'Your notes' })).toBeVisible();
 });

@@ -117,6 +117,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL and WebSocket durable flow', () => {
     socket.send(JSON.stringify({
       type: 'hello',
       pageId,
+      accountId: DEV_ACCOUNT_ID,
       protocolVersion: PROTOCOL_VERSION,
       schemaVersion: DOCUMENT_SCHEMA_VERSION
     }));

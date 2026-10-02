@@ -95,7 +95,7 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
     async function identity(request: FastifyRequest) {
       if (fixture) return { accountId: DEV_ACCOUNT_ID, email: 'Local development', sessionId: undefined };
       const active = await auth!.api.getSession({ headers: authHeaders(request), query: { disableCookieCache: true, disableRefresh: true } });
-      return active ? { accountId: active.user.id, email: active.user.email, sessionId: active.session.id } : null;
+      return active ? { accountId: active.user.id, name: active.user.name, email: active.user.email, sessionId: active.session.id } : null;
     }
 
     function authHeaders(request: FastifyRequest): Headers {

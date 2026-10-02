@@ -4,6 +4,8 @@ import {
   DOCUMENT_SCHEMA_VERSION,
   PROTOCOL_VERSION,
   serverMessageSchema,
+  decodeUpdate,
+  MAX_PRESENCE_SNAPSHOT_BYTES,
   pageSessionSchema,
   type ClientMessage,
   type DevSession,
@@ -15,6 +17,7 @@ interface Callbacks {
   connection(state: Connection): void;
   message(message: ServerMessage): Promise<void>;
   error(message: string, terminal: boolean): void;
+  presence?(update: Uint8Array): void;
 }
 
 const HANDSHAKE_TIMEOUT_MS = 10_000;
@@ -132,6 +135,7 @@ export class SyncClient {
       this.send({
         type: 'hello',
         pageId: this.identity.pageId,
+        accountId: this.identity.accountId,
         protocolVersion: PROTOCOL_VERSION,
         schemaVersion: DOCUMENT_SCHEMA_VERSION,
       });
@@ -146,19 +150,38 @@ export class SyncClient {
   }
 
   private enqueueMessage(data: unknown, generation: number): void {
+    if (generation !== this.generation) return;
+    let message: ServerMessage;
+    try {
+      const parsed = serverMessageSchema.safeParse(JSON.parse(String(data)));
+      if (!parsed.success) throw new Error('The server sent an unsupported response. Your local work has been preserved.');
+      message = parsed.data;
+      // Cursor traffic never waits on IndexedDB or enters document persistence.
+      if (message.type === 'presence') {
+        const update = decodeUpdate(message.update);
+        if (update.byteLength > MAX_PRESENCE_SNAPSHOT_BYTES) throw new Error('The server sent unsupported presence.');
+        this.callbacks.presence?.(update);
+        return;
+      }
+    } catch (error) {
+      // Keep terminal protocol failure behind any already admitted durable
+      // hydration; it must not be overwritten by that transaction completing.
+      this.messageChain = this.messageChain.then(() => {
+        if (generation === this.generation) this.fail(error instanceof Error ? error.message : 'Could not read the server response.');
+      }).catch(() => {
+        if (generation === this.generation) this.fail('Could not read the server response.');
+      });
+      return;
+    }
     // Ordered delivery includes the session's asynchronous local persistence.
     this.messageChain = this.messageChain.then(async () => {
       if (generation !== this.generation) return;
-      const parsed = serverMessageSchema.safeParse(JSON.parse(String(data)));
-      if (!parsed.success) {
-        throw new Error('The server sent an unsupported response. Your local work has been preserved.');
-      }
-      await this.callbacks.message(parsed.data);
-      if (!this.identity.fixture && parsed.data.type === 'error' && parsed.data.code === 'ACCESS_DENIED') {
+      await this.callbacks.message(message);
+      if (!this.identity.fixture && message.type === 'error' && message.code === 'ACCESS_DENIED') {
         window.dispatchEvent(new CustomEvent('kikit-access-lost', { detail: { pageId: this.identity.pageId } }));
         window.dispatchEvent(new Event('kikit-session-ended'));
       }
-      if (parsed.data.type === 'sync' && generation === this.generation) {
+      if (message.type === 'sync' && generation === this.generation) {
         clearTimeout(this.connectionTimer);
       }
     }).catch(error => {

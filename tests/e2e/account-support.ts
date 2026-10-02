@@ -6,6 +6,7 @@ import * as Y from 'yjs';
 import { decodeUpdate } from '@kikit/contracts';
 import { createServer } from '../../apps/server/src/app';
 import { migrateDatabase } from '../../apps/server/src/migrations';
+export { expectDocumentText, expectDocumentContains, expectDocumentExcludes } from './document-assertions';
 
 export const accountDatabaseUrl = 'postgres://kikit:kikit_local_only@127.0.0.1:54329/kikit_e2e';
 export const accountOrigin = 'http://127.0.0.1:5198';

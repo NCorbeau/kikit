@@ -119,7 +119,7 @@ The PostgreSQL sharing checks cover hashed, explicit and idempotent joins; priva
 
 The sharing browser scenarios use distinct Better Auth accounts and independent contexts. They decode actual QR pixels and compare the result with the invitation URL, keep invitation secrets out of login callback URLs, require an explicit join, converge edits and list joined notes on another device. They exercise replaced/disabled links, active and offline-reload revocation, retained binary recovery with stable pending identities, failed IndexedDB writes and export-before-navigation, Escape cancellation, and a cookie account switch before joining. The account and sharing Playwright projects run serially with fresh workers so Better Auth's enabled in-memory login limiter does not leak between suites; the tests do not intercept authentication requests.
 
-The restore drill now populates and compares `page_invitations` as well as the account and durable document records. A restored invitation can be found by its hash, and disabled state is retained. Runtime DDL denial and continued writes still pass. The first worktree run could not find the Compose service under its default project name; the recorded successful run explicitly selected the existing local `kikit` project.
+The restore drill now populates and compares `page_invitations` as well as the account and durable document records. A restored active invitation can be found by its hash, and invitation availability is retained. Runtime DDL denial and continued writes still pass. The first worktree run could not find the Compose service under its default project name; the recorded successful run explicitly selected the existing local `kikit` project.
 
 These checks establish local authenticated shared-page access. They do not verify hosted email delivery or the Railway collaboration gate. Presence, page deletion policy, hosted sharing, scheduled backups and recovery import remain outside this checkpoint. No Railway deployment or configuration was changed.
 
@@ -190,3 +190,29 @@ Merge/default-branch execution and repository rulesets requiring these checks re
 ### Restore drill readability refactor · 2026-10-02
 
 Extracted named setup, sign-in, page creation, restored-session/page verification, and cleanup functions in `scripts/verify-backup-restore.ts`. Session and committed-page data have explicit types; the scenario retains every restore assertion, static failure diagnostics, and client-disconnect ordering. `pnpm typecheck`, `pnpm exec vitest run scripts/verify-backup-restore.test.ts` (one failure-diagnostic regression), and `pnpm test:restore` passed locally against the existing PostgreSQL 17.9 Compose service. These are checks for the refactor; the full hosted suite above was recorded before it.
+
+## 2026-10-02: complete local shared-page slice and transient presence
+
+Executed in the isolated `kikit-shared-pages` worktree after rebasing onto `cb80431`, the merged CI baseline. This checkpoint supersedes the earlier sharing checkpoint's deferred-presence status. Node 24.21.0, pnpm 12.5.1, local PostgreSQL 17.9 and Playwright Chromium were used; authenticated browser scenarios served the production Vite build with captured email and the authentication limiter enabled.
+
+| Check | Result |
+| --- | --- |
+| `pnpm install --frozen-lockfile` | Passed |
+| `pnpm typecheck` | Passed |
+| `pnpm test` | 77 passed; 35 opt-in PostgreSQL checks skipped |
+| `pnpm test:integration` | 35 passed: 7 accounts, 7 persistence/WebSocket, 6 migrations, 10 sharing, 5 presence |
+| `pnpm test:e2e` | All 18 editor/failure/recovery scenarios passed |
+| `pnpm test:e2e:accounts` | All 8 passed: 2 accounts, 5 sharing, 1 presence |
+| `COMPOSE_PROJECT_NAME=kikit pnpm test:restore` | Passed with invitation hashes, exact record fingerprints, receipt reuse, continued writing and runtime DDL denial |
+| `pnpm build` and `docker build -t kikit-shared-pages-check .` | Passed; Docker build used Linux ARM64 |
+| `git diff origin/main --check` | Passed |
+
+Presence tests verify authenticated identity replacement, client-ID ownership, bounded/malformed frames and rate admission, private-page and older-protocol denial, reconnect snapshots, active revocation, timers/cleanup and unchanged durable rows. A WebSocket handshake cannot join with a mounted account different from its authenticated cookie. Room overload regressions retain an in-flight document until serialized cleanup instead of destroying it during a commit. Browser-client tests cover presence delivery while durable hydration is waiting and terminal protocol errors ordered behind that hydration.
+
+The actual two-account browser scenario checks participant indicators, title/body cursors and selections, reconnect with the same client identity, and disappearance on revocation. It compares document and invitation records before and after presence-only activity. Synthetic [desktop](screenshots/shared-presence-desktop.png) and [320px dark](screenshots/shared-presence-mobile-dark.png) screenshots were inspected; cursor labels remain within the viewport and the sharing dialog contains keyboard focus. These checks do not constitute a full screen-reader or native mobile keyboard audit.
+
+Adding awareness exposed an empty-body reconnect regression: a cursor-only ProseMirror transaction could persist its implicit paragraph without a stable block ID before the server's committed repair. The narrow body-only metadata guard prevents that projection from entering Yjs while the shared body is empty. The existing concurrent-deletion browser scenario now passes with matching repaired IDs, subsequent durable edits and reload. Real edits and server validation remain intact. An offline navigation-cancellation regression also confirms Escape restores editing and retained drafts; terminal access denial stays locked until authorized recovery.
+
+Editor assertions inspect ProseMirror document text rather than decoration-bearing DOM text, preserving exact content/convergence checks when cursor labels are present. Account, sharing and presence projects use fresh serial workers. No authentication request is intercepted.
+
+The web bundle is 837.51 kB before gzip (255.06 kB gzip), with Vite's large-chunk advisory. No performance or capacity claim is made. The complete slice changes wire protocol to 2 and database schema to 3; document schema remains 1. Matching web/server deployment, migration and runtime invitation-table privileges are required. No Railway service, database or deployment was changed. Hosted email/login/private-note and sharing checks, scheduled backups/hosted restore, page deletion policy, compaction and recovery import remain separate work. These local results do not establish the hosted v1 release gate.

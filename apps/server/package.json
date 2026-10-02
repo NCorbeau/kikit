@@ -18,10 +18,12 @@
     "better-auth": "1.7.7",
     "drizzle-orm": "0.45.3",
     "fastify": "5.12.5",
+    "lib0": "^0.2.119",
     "p-queue": "9.3.3",
     "pg": "^8.16.0",
     "tsx": "^4.23.15",
     "ws": "^8.18.0",
+    "y-protocols": "1.0.7",
     "yjs": "13.6.33"
   },
   "devDependencies": {

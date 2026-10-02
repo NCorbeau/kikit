@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const DOCUMENT_SCHEMA_VERSION = 1;
 export const DATABASE_SCHEMA_VERSION = 3;
 export const DEV_ACCOUNT_ID = 'dev-writer';
@@ -9,12 +9,17 @@ export const TITLE_FRAGMENT = 'title';
 export const BODY_FRAGMENT = 'body';
 export const MAX_UPDATE_BYTES = 256 * 1024;
 export const MAX_WIRE_BYTES = 400 * 1024;
+export const MAX_PRESENCE_BYTES = 4 * 1024;
+export const MAX_PRESENCE_SNAPSHOT_BYTES = 128 * 1024;
 
 const base64UpdateSchema = z.string()
   .min(4)
   .max(Math.ceil(MAX_UPDATE_BYTES / 3) * 4)
   .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/);
 const batchIdSchema = z.string().uuid();
+const presenceUpdateSchema = (maxBytes: number) => z.string().min(4)
+  .max(Math.ceil(maxBytes / 3) * 4)
+  .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/);
 
 export const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({
@@ -22,12 +27,15 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     protocolVersion: z.number().int(),
     schemaVersion: z.number().int(),
     pageId: z.string().uuid(),
+    // Optional only so an older hello reaches the explicit version rejection.
+    accountId: z.string().min(1).max(128).optional(),
   }).strict(),
   z.object({
     type: z.literal('update'),
     batchId: batchIdSchema,
     update: base64UpdateSchema,
   }).strict(),
+  z.object({ type: z.literal('presence'), update: presenceUpdateSchema(MAX_PRESENCE_BYTES) }).strict(),
 ]);
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 
@@ -49,6 +57,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
     batchId: batchIdSchema,
     sequence: z.number().int().nonnegative(),
   }).strict(),
+  z.object({ type: z.literal('presence'), update: presenceUpdateSchema(MAX_PRESENCE_SNAPSHOT_BYTES) }).strict(),
   z.object({
     type: z.literal('error'),
     code: z.string(),

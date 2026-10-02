@@ -6,7 +6,7 @@ import { AccessError } from './persistence-errors.js';
 import { createSeed } from './document.js';
 import { pages, pageGrants, session } from './schema.js';
 
-export interface Principal { accountId: string; sessionId?: string }
+export interface Principal { accountId: string; sessionId?: string; name?: string; email?: string }
 
 /** Held until COMMIT: session deletion cannot race an authorized document write. */
 export async function lockSession(db: NodePgDatabase, principal: Principal): Promise<void> {

@@ -7,6 +7,7 @@ export default defineConfig({
   projects: [
     { name: 'accounts', testMatch: 'accounts.spec.ts' },
     { name: 'sharing', testMatch: 'sharing.spec.ts' },
+    { name: 'presence', testMatch: 'presence.spec.ts' },
   ],
   timeout: 90_000, expect: { timeout: 12_000 },
   use: { baseURL: 'http://127.0.0.1:5198', trace: process.env.CI ? 'off' : 'retain-on-failure', screenshot: 'only-on-failure' },

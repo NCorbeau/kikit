@@ -16,6 +16,7 @@ import {
   type StoredUpdate,
 } from './local-store';
 import { SyncClient, type Connection } from './sync-client';
+import { DocumentPresence } from './presence';
 
 export interface SessionSnapshot {
   ready: boolean;
@@ -29,6 +30,7 @@ export interface SessionSnapshot {
 
 export interface DocumentSession {
   doc: Y.Doc;
+  presence: DocumentPresence;
   start(): Promise<void>;
   subscribe(listener: () => void): () => void;
   getSnapshot(): SessionSnapshot;
@@ -51,6 +53,7 @@ interface TransportCallbacks {
   connection(state: Connection): void;
   message(message: ServerMessage): Promise<void>;
   error(message: string, terminal: boolean): void;
+  presence(update: Uint8Array): void;
 }
 
 /** Constructor dependencies keep failure tests independent of browser transport. */
@@ -75,6 +78,7 @@ export function createDocumentSession(dependencies: SessionDependencies = {}): D
 
 class Session implements DocumentSession {
   readonly doc = new Y.Doc();
+  readonly presence: DocumentPresence;
   private readonly store: DocumentStore;
   private readonly transport: Transport;
   private readonly listeners = new Set<() => void>();
@@ -100,6 +104,7 @@ class Session implements DocumentSession {
   private synchronized = false;
   private terminalError = false;
   private editingLocked = false;
+  private pausedEditable?: boolean;
   private connectionEpoch = 0;
   private incompatibleCache: StoredUpdate[] = [];
   private inFlightBatchId?: string;
@@ -114,10 +119,15 @@ class Session implements DocumentSession {
   constructor(dependencies: SessionDependencies) {
     this.identity = dependencies.identity ?? { accountId: DEV_ACCOUNT_ID, pageId: DEV_PAGE_ID, fixture: true };
     this.store = dependencies.store ?? new LocalStore(this.identity.accountId, this.identity.pageId);
+    this.presence = new DocumentPresence(this.doc, {
+      accountId: this.identity.accountId,
+      send: update => this.transport.send({ type: 'presence', update: encodeUpdate(update) }),
+    });
     const callbacks: TransportCallbacks = {
       connection: state => this.connectionChanged(state),
       message: message => this.receive(message),
       error: (message, terminal) => this.failRemote(message, terminal),
+      presence: update => this.presence.receive(update),
     };
     this.transport = dependencies.transport?.(callbacks) ?? new SyncClient(callbacks, this.identity);
   }
@@ -137,6 +147,7 @@ class Session implements DocumentSession {
 
   private connectionChanged(state: Connection): void {
     if (state !== 'online') {
+      this.presence.disconnect();
       this.connectionEpoch++;
       this.synchronized = false;
       this.clearInFlightBatch();
@@ -318,6 +329,7 @@ class Session implements DocumentSession {
       this.synchronized = true;
       this.remoteError = null;
       this.publish({ connection: 'online' });
+      this.presence.connect();
       this.sendNextBatch();
     }
   }
@@ -348,6 +360,7 @@ class Session implements DocumentSession {
   private stopForIncompatibleCache(error: unknown): void {
     if (!(error instanceof CacheCompatibilityError)) return;
     this.editingLocked = true;
+    this.pausedEditable = false;
     this.terminalError = true;
     this.transport.stopWithError();
   }
@@ -360,9 +373,10 @@ class Session implements DocumentSession {
   private failRemote(message: string, terminal: boolean): void {
     this.remoteError = message;
     this.terminalError = terminal;
-    if (terminal) this.editingLocked = true;
+    if (terminal) { this.editingLocked = true; this.pausedEditable = false; }
     this.clearInFlightBatch();
     this.synchronized = false;
+    this.presence.disconnect();
     this.publish({ connection: 'error' });
   }
 
@@ -379,6 +393,10 @@ class Session implements DocumentSession {
     this.appendError = null;
     this.receiptError = null;
     this.remoteError = null;
+    // Canceling a voluntary departure can resume cached writing offline. A
+    // genuine access/compatibility denial still requires verified synchronization.
+    if (this.pausedEditable) this.editingLocked = false;
+    this.pausedEditable = undefined;
     this.terminalError = false;
     this.synchronized = false;
     this.clearInFlightBatch();
@@ -414,6 +432,8 @@ class Session implements DocumentSession {
   }
 
   async pause(): Promise<void> {
+    this.pausedEditable ??= !this.editingLocked;
+    this.presence.disconnect();
     this.editingLocked = true;
     this.terminalError = true;
     this.clearInFlightBatch();
@@ -426,6 +446,7 @@ class Session implements DocumentSession {
     this.destroyed = true;
     clearTimeout(this.receiptTimer);
     this.transport.destroy();
+    this.presence.destroy();
     window.removeEventListener('beforeunload', this.warnBeforeLeaving);
     this.doc.off('update', this.localDocumentChanged);
     this.doc.destroy();
