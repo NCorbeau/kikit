@@ -12,6 +12,7 @@ export class InvitationError extends AccessError {
 }
 
 type LockedPage = typeof pages.$inferSelect;
+type LockedGrant = Pick<typeof pageGrants.$inferSelect, 'role'>;
 const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/;
 
 function tokenHash(token: string): string {
@@ -36,32 +37,55 @@ async function withLockedPage<T>(
 ): Promise<T> {
   if (!principal.sessionId) throw new AccessError('Sign in required');
   const client = await pool.connect();
-  let discard = false;
-  let committing = false;
+  let discardConnection = false;
+  let commitAttempted = false;
   try {
     await client.query('BEGIN');
     const db = drizzle(client);
     await lockSession(db, principal);
     const page = await lockPage(db, pageId);
     const result = await task(db, page);
-    committing = true;
+    commitAttempted = true;
     await client.query('COMMIT');
     return result;
   } catch (error) {
     // A failed COMMIT response may conceal success. The queue wrapper must
     // invalidate/revalidate live access before allowing subsequent propagation.
-    if (committing) discard = true;
-    try { await client.query('ROLLBACK'); } catch { discard = true; }
+    if (commitAttempted) discardConnection = true;
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      discardConnection = true;
+    }
     throw error;
-  } finally { client.release(discard); }
+  } finally {
+    client.release(discardConnection);
+  }
+}
+
+async function lockGrant(db: NodePgDatabase, pageId: string, accountId: string): Promise<LockedGrant | undefined> {
+  const [grant] = await db.select({ role: pageGrants.role }).from(pageGrants).where(and(
+    eq(pageGrants.pageId, pageId), eq(pageGrants.accountId, accountId),
+  )).for('update');
+  return grant;
 }
 
 async function requireOwner(db: NodePgDatabase, page: LockedPage, principal: Principal): Promise<void> {
   if (page.ownerId !== principal.accountId) throw new AccessError('Page access denied');
-  const [grant] = await db.select({ role: pageGrants.role }).from(pageGrants).where(and(
-    eq(pageGrants.pageId, page.id), eq(pageGrants.accountId, principal.accountId),
-  )).for('update');
+  const grant = await lockGrant(db, page.id, principal.accountId);
   if (grant?.role !== 'owner') throw new AccessError('Page access denied');
+}
+
+function requireConsistentOwnership(page: LockedPage, accountId: string, grant: LockedGrant | undefined): void {
+  const isPageOwner = page.ownerId === accountId;
+  const hasOwnerGrant = grant?.role === 'owner';
+  if (isPageOwner !== hasOwnerGrant) throw new AccessError('Page access denied');
+}
+
+async function requireActiveInvitation(db: NodePgDatabase, pageId: string, hash: string): Promise<void> {
+  const [invitation] = await db.select({ tokenHash: pageInvitations.tokenHash, disabled: pageInvitations.disabled })
+    .from(pageInvitations).where(eq(pageInvitations.pageId, pageId)).for('update');
+  if (!invitation || invitation.disabled || invitation.tokenHash !== hash) throw new InvitationError();
 }
 
 export async function joinInvitation(
@@ -69,24 +93,15 @@ export async function joinInvitation(
 ): Promise<PageSummary> {
   const hash = tokenHash(token);
   return withLockedPage(pool, pageId, principal, async (db, page) => {
-    const [existingGrant] = await db.select({ role: pageGrants.role }).from(pageGrants).where(and(
-      eq(pageGrants.pageId, pageId), eq(pageGrants.accountId, principal.accountId),
-    )).for('update');
-    if ((page.ownerId === principal.accountId && existingGrant?.role !== 'owner')
-      || (page.ownerId !== principal.accountId && existingGrant?.role === 'owner')) {
-      throw new AccessError('Page access denied');
-    }
-    const [invitation] = await db.select({ tokenHash: pageInvitations.tokenHash, disabled: pageInvitations.disabled })
-      .from(pageInvitations).where(eq(pageInvitations.pageId, pageId)).for('update');
-    if (!invitation || invitation.disabled || invitation.tokenHash !== hash) throw new InvitationError();
+    const existingGrant = await lockGrant(db, pageId, principal.accountId);
+    requireConsistentOwnership(page, principal.accountId, existingGrant);
+    await requireActiveInvitation(db, pageId, hash);
     // The page lock also serializes concurrent joins when this grant is absent.
     // DO NOTHING preserves an existing owner/editor role and makes retries safe.
     await db.insert(pageGrants).values({ pageId, accountId: principal.accountId, role: 'editor' })
       .onConflictDoNothing({ target: [pageGrants.pageId, pageGrants.accountId] });
-    const [grant] = await db.select({ role: pageGrants.role }).from(pageGrants).where(and(
-      eq(pageGrants.pageId, pageId), eq(pageGrants.accountId, principal.accountId),
-    )).for('update');
-    return { id: page.id, title: page.title, createdAt: page.createdAt.toISOString(), role: grant.role };
+    const grant = await lockGrant(db, pageId, principal.accountId);
+    return { id: page.id, title: page.title, createdAt: page.createdAt.toISOString(), role: grant!.role };
   });
 }
 
@@ -128,9 +143,7 @@ export async function removeMember(
   await withLockedPage(pool, pageId, principal, async (db, page) => {
     await requireOwner(db, page, principal);
     if (page.ownerId === accountId) throw new AccessError('The owner cannot be removed');
-    const [grant] = await db.select({ role: pageGrants.role }).from(pageGrants).where(and(
-      eq(pageGrants.pageId, pageId), eq(pageGrants.accountId, accountId),
-    )).for('update');
+    const grant = await lockGrant(db, pageId, accountId);
     if (!grant) return; // A retried removal has the same durable outcome.
     if (grant.role !== 'editor') throw new AccessError('The owner cannot be removed');
     await db.delete(pageGrants).where(and(
