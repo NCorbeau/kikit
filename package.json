@@ -24,17 +24,18 @@
     "test:restore": "tsx scripts/verify-backup-restore.ts"
   },
   "devDependencies": {
+    "@kikit/contracts": "workspace:*",
     "@playwright/test": "1.63.0",
     "@types/node": "^24.0.0",
+    "@types/pg": "^8.15.0",
+    "@types/ws": "^8.18.0",
+    "fake-indexeddb": "^6.2.0",
+    "jsqr": "^1.4.0",
+    "pg": "^8.16.0",
     "tsx": "^4.20.0",
     "typescript": "5.9.3",
     "vitest": "3.2.4",
-    "fake-indexeddb": "^6.2.0",
-    "@kikit/contracts": "workspace:*",
-    "pg": "^8.16.0",
-    "@types/pg": "^8.15.0",
     "ws": "^8.18.0",
-    "@types/ws": "^8.18.0",
     "yjs": "13.6.33"
   }
 }

@@ -6,10 +6,11 @@ import { AppHeader } from './AppHeader';
 import { DownloadIcon } from './Icons';
 import { SaveStatus, hasSaveFailure } from './SaveStatus';
 
-export function DocumentPage({ session, snapshot, accountActions }: {
+export function DocumentPage({ session, snapshot, accountActions, onHome }: {
   session: DocumentSession;
   snapshot: SessionSnapshot;
   accountActions?: ReactNode;
+  onHome?(): void;
 }) {
   const recovery = useRecoveryDownload(session);
   const failed = hasSaveFailure(snapshot);
@@ -18,7 +19,7 @@ export function DocumentPage({ session, snapshot, accountActions }: {
   return (
     <div className="app-shell">
       <a href="#writing" className="skip-link">Skip to writing</a>
-      <AppHeader>
+      <AppHeader onHome={onHome}>
         {accountActions}
         <SaveStatus snapshot={snapshot} onRetry={retry} />
         <button

@@ -101,6 +101,10 @@ export class SyncClient {
         if (response.status >= 400 && response.status < 500) {
           this.fail('Page access is unavailable. Your local work has been preserved.');
           if (!this.identity.fixture && response.status === 401) window.dispatchEvent(new Event('kikit-session-ended'));
+          if (!this.identity.fixture && response.status === 403) {
+            window.dispatchEvent(new CustomEvent('kikit-access-lost', { detail: { pageId: this.identity.pageId } }));
+            window.dispatchEvent(new Event('kikit-session-ended'));
+          }
           return;
         }
         throw new Error('The server is unavailable.');
@@ -151,6 +155,7 @@ export class SyncClient {
       }
       await this.callbacks.message(parsed.data);
       if (!this.identity.fixture && parsed.data.type === 'error' && parsed.data.code === 'ACCESS_DENIED') {
+        window.dispatchEvent(new CustomEvent('kikit-access-lost', { detail: { pageId: this.identity.pageId } }));
         window.dispatchEvent(new Event('kikit-session-ended'));
       }
       if (parsed.data.type === 'sync' && generation === this.generation) {

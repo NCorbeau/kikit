@@ -26,7 +26,7 @@ The auth limiter is enabled (60 requests/minute globally per IP, with the magic-
 | `/api/sync` | Authenticated WebSocket; page access checked on join and every update |
 | `GET /api/health` | 200 only when the database is reachable with schema version 2 |
 
-Each new note is initialized once with an empty title and one empty body paragraph. The owner grant is created in the same transaction. Creation is serialized per account and bounded to 100 owned notes as an initial resource guardrail. Deletion and membership controls are deferred.
+Each new note is initialized once with an empty title and one empty body paragraph. The owner grant is created in the same transaction. Creation is serialized per account and bounded to 100 owned notes as an initial resource guardrail. Deletion remains deferred. The [shared-page slice](shared-pages-contract.md) adds invitation and membership controls with database schema 3.
 
 ## Revocation and durable writes
 
@@ -44,6 +44,6 @@ Before navigation/logout, the session pauses editing and transport, then settles
 
 ## Release boundary
 
-The slice covers magic-link accounts and private notes. Same-account devices synchronize through the custom backend. Invitations, shared membership management, presence/cursors, and note deletion are deferred. Two distinct-account private-page denial is tested; it does not establish the full shared-page release gate.
+The slice covers magic-link accounts and private notes. Same-account devices synchronize through the custom backend. The [shared-page slice](shared-pages-contract.md) adds invitations, membership management and revocation recovery. Presence/cursors and note deletion remain deferred. Two distinct-account private-page denial is tested; it does not establish the full shared-page release gate.
 
 See [verification](verification.md) for executed checks and [deployment](deployment.md) for hosted setup. Actual HTTPS cookies/proxy behavior, real Resend delivery, daily Railway backups, and a Railway restore must be verified before valuable production notes are stored.
