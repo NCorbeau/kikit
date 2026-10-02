@@ -46,18 +46,17 @@ async function authorizeLockedPage(
   pageId: string,
   accountId: string,
 ) {
+  // Lock the page before its grant. Select original document columns so the
+  // legacy-schema adoption drill can still read retained bytes before migration.
   const [page] = await db.select({
-    sequence: pages.sequence,
-    initialState: pages.initialState,
-    schemaVersion: pages.schemaVersion,
-  }).from(pages)
-    .innerJoin(pageGrants, and(
-      eq(pageGrants.pageId, pages.id),
-      eq(pageGrants.accountId, accountId),
-    ))
-    .where(and(eq(pages.id, pageId), inArray(pageGrants.role, ['owner', 'editor'])))
-    .for('update', { of: [pages, pageGrants] });
+    sequence: pages.sequence, initialState: pages.initialState, schemaVersion: pages.schemaVersion,
+  }).from(pages).where(eq(pages.id, pageId)).for('update');
   if (!page) throw new AccessError('Page access denied');
+  const [grant] = await db.select().from(pageGrants).where(and(
+    eq(pageGrants.pageId, pageId), eq(pageGrants.accountId, accountId),
+    inArray(pageGrants.role, ['owner', 'editor']),
+  )).for('update');
+  if (!grant) throw new AccessError('Page access denied');
   if (page.schemaVersion !== DOCUMENT_SCHEMA_VERSION) {
     throw new CompatibilityError('Unsupported document schema');
   }

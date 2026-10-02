@@ -13,6 +13,7 @@ import { AccessError } from './persistence-errors.js';
 import { SyncRooms } from './sync-room.js';
 import { attachSyncConnection } from './sync-connection.js';
 import { registerTestRoutes, TestFaults } from './test-faults.js';
+import { registerSharingRoutes } from './sharing-routes.js';
 
 interface ServerOptions {
   databaseUrl?: string;
@@ -171,6 +172,7 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
       return { accountId: active.accountId, pageId: request.params.pageId, protocolVersion: PROTOCOL_VERSION, schemaVersion: DOCUMENT_SCHEMA_VERSION };
     });
 
+    registerSharingRoutes(app, pool, rooms, identity);
     registerTestRoutes(app, faults, () => ({ ...rooms.queues.metrics, rooms: rooms.size, connections: connections.size }));
     app.get('/api/sync', {
       websocket: true,
