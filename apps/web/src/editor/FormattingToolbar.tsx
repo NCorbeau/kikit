@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/react';
 import { UndoIcon } from '../components/Icons';
-import { liftSelectedTasks } from './task-list-commands';
+import { setTextBlock } from './formatting-commands';
 
 export interface FormattingSelection {
   paragraph: boolean;
@@ -15,30 +15,13 @@ export function FormattingToolbar({ editor, editable, selection }: {
   editable: boolean;
   selection: FormattingSelection | null;
 }) {
-  const setTextBlock = (level?: 1 | 2 | 3) => {
-    if (!editor) return;
-    const chain = editor.chain().focus();
-    // A task's paragraph cannot become a heading inside its item. Lift the
-    // selected items first; their text and paragraph identities survive.
-    chain.command(liftSelectedTasks);
-    chain.command(({ tr, state }) => {
-      const type = level ? state.schema.nodes.heading : state.schema.nodes.paragraph;
-      tr.doc.nodesBetween(tr.selection.from, tr.selection.to, (node, pos) => {
-        if (node.type.name !== 'paragraph' && node.type.name !== 'heading') return;
-        tr.setNodeMarkup(pos, type, { ...node.attrs, ...(level ? { level } : {}) });
-      });
-      return true;
-    });
-    chain.run();
-  };
-
   return (
     <div className="format-bar" role="group" aria-label="Text formatting">
       <div className="format-group">
         <button
           type="button" className="format-button paragraph-button" aria-label="Paragraph"
           disabled={!editable} aria-pressed={selection?.paragraph}
-          onClick={() => setTextBlock()}
+          onClick={() => { if (editor) setTextBlock(editor); }}
         >
           <span className="paragraph-symbol" aria-hidden="true">¶</span> Text
         </button>
@@ -46,7 +29,7 @@ export function FormattingToolbar({ editor, editable, selection }: {
           <button
             key={level} type="button" className="format-button" aria-label={`Heading ${level}`}
             disabled={!editable} aria-pressed={selection?.heading === level} title={`Heading ${level}`}
-            onClick={() => setTextBlock(level)}
+            onClick={() => { if (editor) setTextBlock(editor, level); }}
           >
             H<span className="heading-number">{level}</span>
           </button>

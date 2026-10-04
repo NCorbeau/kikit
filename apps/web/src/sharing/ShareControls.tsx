@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
+import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { containDialogFocus } from '../components/dialog-focus';
 import { ShareConfirmation } from './ShareConfirmation';
 import { useSharingDialog } from './useSharingDialog';
 
@@ -52,32 +53,13 @@ function ShareDialog({ pageId, accountId, onClose }: {
     }
   }
 
-  function keepFocusInsideDialog(event: KeyboardEvent<HTMLDialogElement>): void {
-    if (event.key !== 'Tab') {
-      return;
-    }
-    const controls = [...event.currentTarget.querySelectorAll<HTMLElement>(
-      'button:not(:disabled), input:not(:disabled), a[href], select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-    )].filter(control => control.getClientRects().length > 0);
-    const first = controls[0];
-    const last = controls.at(-1);
-
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last?.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first?.focus();
-    }
-  }
-
   return (
     <dialog
       ref={dialog}
       className="share-dialog"
       aria-labelledby="share-title"
       onCancel={handleCancel}
-      onKeyDown={keepFocusInsideDialog}
+      onKeyDown={containDialogFocus}
     >
       <div className="share-heading">
         <h2 id="share-title">Share note</h2>

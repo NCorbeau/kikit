@@ -97,6 +97,13 @@ test('invitation QR/link, secret-free login continuation, explicit join, and two
   const privateId = await createNote(owner.page, 'Owner private note', 'Visible only to its owner.');
   const pageId = await createNote(owner.page, 'Shared browser note', 'Shared starting point.');
   const { token, url } = await createInvitation(owner.page);
+  const close = sharingDialog(owner.page).getByRole('button', { name: 'Close sharing controls', exact: true });
+  const copy = sharingDialog(owner.page).getByRole('button', { name: 'Copy link', exact: true });
+  await close.focus();
+  await owner.page.keyboard.press('Shift+Tab');
+  await expect(copy).toBeFocused();
+  await owner.page.keyboard.press('Tab');
+  await expect(close).toBeFocused();
   await sharingDialog(owner.page).getByRole('button', { name: 'Copy link', exact: true }).click();
   expect(await owner.page.evaluate(() => navigator.clipboard.readText())).toBe(url);
   await closeSharing(owner.page);
