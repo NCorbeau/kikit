@@ -67,6 +67,27 @@ test('production build: magic links, isolated accounts, cross-device sync, offli
     await pageA.getByRole('textbox', { name: 'Page title', exact: true }).fill('Private browser note');
     await body(pageA).fill('First device.'); await saved(pageA);
     const pageId = new URL(pageA.url()).hash.split('/').at(-1)!;
+    // Saved notes return directly to the list through either header control or
+    // browser navigation, without mounting a confirmation dialog.
+    await pageA.evaluate(() => {
+      document.documentElement.dataset.leaveDialogOpened = 'false';
+      const showModal = HTMLDialogElement.prototype.showModal;
+      HTMLDialogElement.prototype.showModal = function() {
+        if (this.classList.contains('leave-dialog')) document.documentElement.dataset.leaveDialogOpened = 'true';
+        return showModal.call(this);
+      };
+    });
+    for (const control of ['notes', 'home', 'browser'] as const) {
+      if (control === 'notes') await pageA.getByRole('button', { name: 'Notes', exact: true }).click();
+      else if (control === 'home') await pageA.getByRole('link', { name: 'Kikit home', exact: true }).click();
+      else await pageA.evaluate(() => { location.hash = ''; });
+      await expect(pageA.getByRole('heading', { name: 'Your notes' })).toBeVisible();
+      await expect(pageA.getByRole('dialog')).toHaveCount(0);
+      await expect(pageA.locator('html')).toHaveAttribute('data-leave-dialog-opened', 'false');
+      await pageA.getByRole('button', { name: 'Private browser note' }).click();
+      await expectDocumentContains(body(pageA), 'First device.');
+      await saved(pageA);
+    }
     await login(pageB, b);
     await expect(pageB.getByRole('button', { name: 'Private browser note' })).toHaveCount(0);
     const denied = await pageB.request.get(`/api/pages/${pageId}/session`);

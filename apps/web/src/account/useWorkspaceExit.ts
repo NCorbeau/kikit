@@ -43,13 +43,25 @@ export function useWorkspaceExit({
     : null;
   const localSaved = snapshot.local === 'saved';
   const canContinue = !busy && (localSaved || exported);
+  const returningToNotes = intent?.kind === 'notes'
+    || (intent?.kind === 'navigate' && intent.route.kind === 'notes');
+  const confirmationRequired = intent !== null
+    && (!returningToNotes || !localSaved || snapshot.pending > 0);
 
   const requestLeave = useCallback(async (next: WorkspaceExitIntent) => {
-    setIntent(next);
     setBusy(true);
     await session.pause();
+    setIntent(next);
     setBusy(false);
   }, [session]);
+
+  useEffect(() => {
+    // Decide only after pause has settled local writes. Pausing disconnects the
+    // transport, so serverSaved no longer describes the note's durability here.
+    if (busy || recoveryRequired || !intent || confirmationRequired) return;
+    if (intent.kind === 'notes') onNotes();
+    else if (intent.kind === 'navigate') onNavigate(intent.route);
+  }, [busy, recoveryRequired, intent, confirmationRequired, onNotes, onNavigate]);
 
   useEffect(() => {
     onGuardNavigation(true);
@@ -128,7 +140,7 @@ export function useWorkspaceExit({
   }
 
   return {
-    intent, busy, error, recoveryReason, localSaved, canContinue,
+    intent, busy, error, recoveryReason, localSaved, canContinue, confirmationRequired,
     requestLeave, finish, exportDraft, keepEditing, continueFromHome,
   };
 }
