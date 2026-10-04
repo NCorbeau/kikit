@@ -71,7 +71,7 @@ export function WorkspaceEditor(props: WorkspaceEditorProps) {
           </>
         }
       />
-      {exit.intent && (
+      {exit.intent && exit.confirmationRequired && (
         <LeavePageDialog
           intent={exit.intent}
           pending={snapshot.pending}
