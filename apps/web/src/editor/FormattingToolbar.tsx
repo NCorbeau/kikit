@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/react';
 import { UndoIcon } from '../components/Icons';
-import { liftSelectedTasks } from './task-list';
+import { liftSelectedTasks } from './task-list-commands';
 
 export interface FormattingSelection {
   paragraph: boolean;
