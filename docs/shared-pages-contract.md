@@ -2,6 +2,8 @@
 
 The shared-page slice extends the private account contract. Document schema remains version 1; wire protocol advances to 2 for transient presence, and database schema advances to 3 through `0002_shared_pages.sql`. Existing notes, binary updates and receipts are retained. Version-1 clients are rejected before editable synchronization; deploy matching web/server versions together and retain offline drafts for recovery.
 
+The subsequent [to-do list slice](task-lists-contract.md) uses document schema 2/database schema 4 and retains wire protocol 2. The access, invitation, presence and receipt boundaries below continue to apply to both task text and checked state.
+
 ## Invitations and membership
 
 Pages remain private by default. The canonical page owner and an owner grant are required for invitation/member management. Editors may read and edit; they cannot manage sharing or remove the owner. Invitations never alter the collaborative document.

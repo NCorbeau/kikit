@@ -12,6 +12,8 @@ Use Resend Free, currently 3,000 emails/month and 100/day. Add a sender subdomai
 
 ## Build and service settings
 
+The to-do list source added on 2026-10-04 is not deployed by this implementation. It requires `0003_task_lists.sql` (database schema 4), document schema 2 and matching web/server assets; wire protocol remains 2. Stop/drain the old server before applying the migration so old sockets cannot continue editing after the compatibility upgrade. No new tables or runtime grants are needed. Preserve existing browser journals, including pending schema-1 drafts, and verify checklist editing/reload/synchronization after any separately authorized rollout. See [the task-list upgrade contract](task-lists-contract.md).
+
 The sharing rollout applied `0002_shared_pages.sql` (database schema 3), granted the restricted runtime role access to `page_invitations`, and deployed matching protocol-2 web/server assets. Existing account/document/update/receipt fingerprints were unchanged across migration. The temporary private-network migration service was removed. Subsequent deployments still require the stop/drain procedure below; automatic deployments remain disabled.
 
 1. Use the repository root as the service root. The root `Dockerfile` builds Node 24/pnpm 12.5.1, then copies the web bundle and production server dependencies into a non-root runtime image. `.dockerignore` excludes environment files and private local agent references.

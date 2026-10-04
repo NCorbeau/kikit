@@ -126,9 +126,9 @@ export async function createNote(page: Page, title: string, content: string): Pr
   return new URL(page.url()).hash.split('/').at(-1)!;
 }
 
-export async function downloadRecovery(page: Page): Promise<RecoveryFile> {
+export async function downloadRecovery(page: Page, buttonName = 'Download recovery'): Promise<RecoveryFile> {
   const downloaded = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Download recovery', exact: true }).click();
+  await page.getByRole('button', { name: buttonName, exact: true }).click();
   const file = await downloaded;
   return JSON.parse(await readFile((await file.path())!, 'utf8')) as RecoveryFile;
 }

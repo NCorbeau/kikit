@@ -52,7 +52,7 @@ The [account contract](docs/accounts-contract.md) describes cookies, authorizati
 
 ## What works
 
-- A collaborative page title, paragraphs, and headings at levels 1–3.
+- A collaborative page title, paragraphs, headings at levels 1–3, and flat checkbox lists.
 - Email magic-link accounts, a private note list, and idempotent creation of empty notes.
 - Normal typing, selection, Enter/Backspace, paste, local collaborative undo/redo, heading shortcuts, labelled controls, visible keyboard focus, and a responsive writing surface.
 - A compact writing UI with light/dark themes. Appearance follows the system until you choose a mode using the header toggle; your choice is remembered locally.
@@ -74,6 +74,12 @@ Owners can create an invitation from **Share**, copy its link or show its QR cod
 Links are shown only when generated because the server stores hashes. Later visits offer an explicit replacement. Invitations remain active until disabled/replaced. Login continuation stays in the initiating tab; if email opens elsewhere, reopen the invitation after signing in. Revoked access hides the editor while retaining drafts and binary recovery export. See [the sharing contract](docs/shared-pages-contract.md).
 
 Authorized collaborators appear above the document with colored cursors and selections in the title and body. Presence is transient: it does not create document updates, receipts, or save acknowledgements. Disconnecting, signing out, or removing membership clears it. Sharing uses database schema 3 and wire protocol 2; matching web/server versions must be deployed together.
+
+## To-do lists
+
+Choose **To-do list** in the formatting controls, or type `[ ] ` at the start of a paragraph. `[x] ` creates a completed item. Enter adds an unchecked item; Enter on an empty item returns to ordinary text. **Text** or a heading control converts the selected items back to ordinary blocks. Checkboxes can be focused with Tab and toggled with Space. Completed items stay in place. Lists support the same local persistence, offline recovery, synchronization and collaborative undo as text.
+
+This source adds document schema 2 and database schema 4 while retaining wire protocol 2. Existing notes and pending browser journals are upgraded without replacing binary history or batch identities. It requires a matching web/server rollout and the new migration; the recorded Railway deployment above still uses the earlier schema versions. See [the task-list contract](docs/task-lists-contract.md).
 
 ## Development identity boundary
 
@@ -146,7 +152,7 @@ The [GitHub Actions workflow](.github/workflows/quality.yml) runs code quality, 
 ## Current limits and next milestone
 
 - One active account server, private notes and authenticated shared pages. PostgreSQL does not coordinate in-memory rooms across replicas. An ownership lock rejects a second account server; deployments require stopping and draining the old instance first.
-- Plain text paragraphs/headings only: no marks, lists, attachments, comments, drag reordering, or advanced blocks.
+- Plain text paragraphs/headings and flat checkbox lists: no marks, nested lists, due dates, reminders, attachments, comments, drag reordering, or advanced blocks.
 - Full-state handshakes and retained binary update histories; no snapshot compaction/pruning. Updates are limited to 256 KiB and committed documents to 2 MiB. These are guardrails, not measured capacity claims.
 - Queues admit at most 64 operations/8 MiB per page and 256 operations/32 MiB globally, including running work. At most 128 sockets; each socket has a 4 MiB outbound budget. Overload leaves uncommitted edits pending.
 - PostgreSQL applies 5-second statement, 2-second lock, and 15-second transaction limits. Queue ownership stays with an operation until completion/rollback. Shutdown stops admission, rejects queued work, and waits for active operations; a network blackhole can still delay shutdown. No deployment deadline or production availability target is claimed.

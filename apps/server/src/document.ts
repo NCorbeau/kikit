@@ -33,12 +33,33 @@ export function validateDocument(doc: Y.Doc): void {
   validateSchema(doc, false);
 }
 
-/** Repair only a valid CRDT merge that deleted all body blocks. */
-export function normalizeEmptyBody(doc: Y.Doc): void {
+/** Repair only otherwise-valid CRDT merges that emptied a required container. */
+export function normalizeEmptyBody(doc: Y.Doc): boolean {
   validateSchema(doc, true);
   const body = doc.getXmlFragment(BODY_FRAGMENT);
-  if (body.length === 0) body.insert(0, [createParagraph('', randomUUID())]);
+  let repaired = false;
+  if (body.length === 0) {
+    body.insert(0, [createParagraph('', randomUUID())]);
+    repaired = true;
+  }
+  for (const list of body.toArray()) {
+    if (!(list instanceof Y.XmlElement) || list.nodeName !== 'taskList') continue;
+    if (list.length === 0) {
+      const item = new Y.XmlElement('taskItem');
+      item.setAttribute('id', randomUUID());
+      item.setAttribute('checked', false as unknown as string);
+      list.insert(0, [item]);
+      repaired = true;
+    }
+    for (const item of list.toArray() as Y.XmlElement[]) {
+      if (item.length === 0) {
+        item.insert(0, [createParagraph('', randomUUID())]);
+        repaired = true;
+      }
+    }
+  }
   validateDocument(doc);
+  return repaired;
 }
 
 function validateSchema(doc: Y.Doc, allowEmptyBody: boolean): void {
@@ -51,7 +72,11 @@ function validateSchema(doc: Y.Doc, allowEmptyBody: boolean): void {
     throw new Error('Document requires a title paragraph and body blocks');
   }
   for (const block of title.toArray()) validateBlock(block, true);
-  for (const block of body.toArray()) validateBlock(block, false);
+  for (const block of body.toArray()) {
+    if (block instanceof Y.XmlElement && block.nodeName === 'taskList') {
+      validateTaskList(block, allowEmptyBody);
+    } else validateBlock(block, false);
+  }
   if (Y.encodeStateAsUpdate(doc).byteLength > MAX_DOCUMENT_BYTES) {
     throw new Error('Development page exceeds 2 MiB');
   }
@@ -71,12 +96,39 @@ function validateBlock(block: unknown, isTitle: boolean): void {
   if (block.nodeName === 'heading' && ![1, 2, 3].includes(Number(attributes.level))) {
     throw new Error('Unsupported heading level');
   }
-  if (!isTitle && (
-    typeof attributes.id !== 'string' || attributes.id.length < 1 || attributes.id.length > 128
-  )) {
+  if (!isTitle) validateId(attributes.id);
+  for (const child of block.toArray()) validatePlainText(child);
+}
+
+function validateId(id: unknown): void {
+  if (typeof id !== 'string' || id.length < 1 || id.length > 128) {
     throw new Error('Body blocks require stable IDs');
   }
-  for (const child of block.toArray()) validatePlainText(child);
+}
+
+function validateTaskList(list: Y.XmlElement, allowEmpty: boolean): void {
+  const attributes = list.getAttributes();
+  validateId(attributes.id);
+  if (Object.keys(attributes).some(key => key !== 'id')) throw new Error('Unsupported task list attribute');
+  if (!allowEmpty && list.length === 0) throw new Error('Task lists require items');
+  for (const item of list.toArray()) {
+    if (!(item instanceof Y.XmlElement) || item.nodeName !== 'taskItem') throw new Error('Task lists require task items');
+    const itemAttributes = item.getAttributes();
+    validateId(itemAttributes.id);
+    if (Object.keys(itemAttributes).some(key => !['id', 'checked'].includes(key))) {
+      throw new Error('Unsupported task item attribute');
+    }
+    if (typeof itemAttributes.checked !== 'boolean') throw new Error('Task items require a boolean checked state');
+    if (item.length > 1 || (!allowEmpty && item.length === 0)) {
+      throw new Error('Task items require one paragraph');
+    }
+    for (const paragraph of item.toArray()) {
+      if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== 'paragraph') {
+        throw new Error('Task items require one paragraph');
+      }
+      validateBlock(paragraph, false);
+    }
+  }
 }
 
 function validatePlainText(child: unknown): void {

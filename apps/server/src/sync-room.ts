@@ -2,7 +2,6 @@ import type pg from 'pg';
 import type { WebSocket } from 'ws';
 import * as Y from 'yjs';
 import {
-  BODY_FRAGMENT,
   DEV_ACCOUNT_ID,
   DOCUMENT_SCHEMA_VERSION,
   MAX_PRESENCE_SNAPSHOT_BYTES,
@@ -353,9 +352,8 @@ function prepareCommittedUpdate(committedDoc: Y.Doc, update: Uint8Array, onTitle
     Y.applyUpdate(candidate, Y.encodeStateAsUpdate(committedDoc));
     Y.applyUpdate(candidate, update);
     if (candidate.store.pendingStructs || candidate.store.pendingDs) throw new DependencyMissing();
-    const needsRepair = candidate.getXmlFragment(BODY_FRAGMENT).length === 0;
     const beforeRepair = Y.encodeStateVector(candidate);
-    normalizeEmptyBody(candidate);
+    const needsRepair = normalizeEmptyBody(candidate);
     onTitle(projectTitle(candidate));
     // Receipt hashes cover submitted bytes. Repairs join them in the committed payload.
     if (needsRepair) return Y.mergeUpdates([update, Y.encodeStateAsUpdate(candidate, beforeRepair)]);

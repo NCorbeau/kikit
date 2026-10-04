@@ -4,6 +4,8 @@ This records the original local fixture milestone. The [private account slice](a
 
 The subsequent [shared-page contract](shared-pages-contract.md) records invitations, membership/revocation and transient presence. It advances database schema to 3 and wire protocol to 2 while retaining document schema 1 and the durable update/receipt flow below.
 
+The [to-do list slice](task-lists-contract.md), added on 2026-10-04, advances document schema to 2 and database schema to 4 while retaining wire protocol 2. Its flat task nodes and metadata upgrades extend the original document definition below; binary histories and receipts remain intact.
+
 Protocol, document schema, and database schema independently start at version 1.
 
 ## Document

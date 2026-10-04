@@ -2,7 +2,7 @@ import { Extension } from '@tiptap/core';
 import { Plugin } from '@tiptap/pm/state';
 import { yCursorPlugin, yCursorPluginKey } from '@tiptap/y-tiptap';
 import type { Awareness } from 'y-protocols/awareness';
-import type { XmlFragment } from 'yjs';
+import { XmlElement, type XmlFragment } from 'yjs';
 import { caretLabels } from './caret-labels';
 
 type PresenceUser = {
@@ -38,15 +38,22 @@ function buildParticipantSelection(user: PresenceUser) {
   };
 }
 
-function emptyBodyAwarenessGuard(body: XmlFragment): Plugin {
+function needsCommittedRepair(body: XmlFragment): boolean {
+  if (body.length === 0) return true;
+  return body.toArray().some(node => node instanceof XmlElement && node.nodeName === 'taskList'
+    && (node.length === 0 || node.toArray().some(item => item instanceof XmlElement
+      && item.nodeName === 'taskItem' && item.length === 0)));
+}
+
+function emptyContentAwarenessGuard(body: XmlFragment): Plugin {
   return new Plugin({
     filterTransaction(transaction) {
-      // Concurrent deletions can temporarily leave an empty Yjs body while
-      // ProseMirror displays an implicit paragraph without a block ID.
+      // Concurrent deletions can temporarily leave an empty body/list/item
+      // while ProseMirror displays an implicit paragraph without a block ID.
       // The binding writes that projection even on a cursor-only refresh.
       // Wait for the committed repair; real document edits remain admitted.
       const awarenessUpdated = transaction.getMeta(yCursorPluginKey)?.awarenessUpdated;
-      return transaction.docChanged || !awarenessUpdated || body.length > 0;
+      return transaction.docChanged || !awarenessUpdated || !needsCommittedRepair(body);
     },
   });
 }
@@ -57,7 +64,7 @@ export function participantCursors(awareness: Awareness, body?: XmlFragment) {
     addProseMirrorPlugins() {
       const plugins: Plugin[] = [];
       if (body) {
-        plugins.push(emptyBodyAwarenessGuard(body));
+        plugins.push(emptyContentAwarenessGuard(body));
       }
       plugins.push(
         yCursorPlugin(awareness, {

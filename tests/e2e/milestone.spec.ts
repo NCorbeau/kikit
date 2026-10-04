@@ -177,13 +177,19 @@ test('offline edits survive an offline reload, then reconnect using the durable 
   await expectDocumentContains(peer.page.getByRole('textbox', { name: 'Page body', exact: true }), text);
 });
 
-test('concurrent offline deletions recover an editable body and drain subsequent journal batches', async ({ browser, request }) => {
+for (const container of ['body', 'taskList'] as const) {
+test(`concurrent offline deletions recover an editable ${container} through cursor refreshes and drain subsequent journal batches`, async ({ browser, request }) => {
   const author = await openPage(browser);
   const bodyA = author.page.getByRole('textbox', { name: 'Page body', exact: true });
   await bodyA.fill('First paragraph');
   await bodyA.press('ControlOrMeta+End');
   await bodyA.press('Enter');
   await author.page.keyboard.insertText('Second paragraph');
+  if (container === 'taskList') {
+    await bodyA.press('ControlOrMeta+a');
+    await author.page.getByRole('button', { name: 'To-do list', exact: true }).click();
+    await expect(bodyA.locator('li[data-type="taskItem"]')).toHaveCount(2);
+  }
   await expectServerSaved(author.page);
   const peer = await openPage(browser);
   const bodyB = peer.page.getByRole('textbox', { name: 'Page body', exact: true });
@@ -192,16 +198,18 @@ test('concurrent offline deletions recover an editable body and drain subsequent
   for (const [body, index] of [[bodyA, 0], [bodyB, 1]] as const) {
     // Use the mounted Tiptap command to delete exactly one whole block. Native
     // selections can merge blocks and thus delete a different CRDT identity.
-    await body.evaluate((element, index) => {
+    await body.evaluate((element, { index, container }) => {
+      type Block = { nodeSize: number; child(index: number): Block };
       const editor = (element as HTMLElement & {
         editor: {
-          state: { doc: { child(index: number): { nodeSize: number } } };
+          state: { doc: Block };
           commands: { deleteRange(range: { from: number; to: number }): boolean };
         }
       }).editor;
-      const from = index === 0 ? 0 : editor.state.doc.child(0).nodeSize;
-      editor.commands.deleteRange({ from, to: from + editor.state.doc.child(index).nodeSize });
-    }, index);
+      const parent = container === 'taskList' ? editor.state.doc.child(0) : editor.state.doc;
+      const from = (container === 'taskList' ? 1 : 0) + (index === 0 ? 0 : parent.child(0).nodeSize);
+      editor.commands.deleteRange({ from, to: from + parent.child(index).nodeSize });
+    }, { index, container });
     await expect(body.locator('p')).toHaveCount(1);
   }
   for (const page of [author.page, peer.page]) await expect(page.getByTestId('local-status')).toHaveText('Saved on this device');
@@ -209,20 +217,45 @@ test('concurrent offline deletions recover an editable body and drain subsequent
   // pending deletion before the server receives B's immutable journal record.
   await author.context.setOffline(false);
   await expectServerSaved(author.page);
-  await peer.context.setOffline(false);
+  await Promise.all([
+    peer.context.setOffline(false),
+    // Real selection changes publish cursor-only awareness while the peer's
+    // pending deletion merges with the newly committed state.
+    (async () => {
+      await bodyA.focus();
+      for (let index = 0; index < 3; index++) {
+        await bodyA.press('ArrowLeft');
+        await bodyA.press('ArrowRight');
+      }
+    })(),
+  ]);
   for (const page of [author.page, peer.page]) await expectServerSaved(page);
   for (const body of [bodyA, bodyB]) {
     await expect(body.locator('p')).toHaveCount(1);
     await expectDocumentText(body, '');
+    if (container === 'taskList') {
+      await expect(body.locator('ul[data-type="taskList"]')).toHaveCount(1);
+      await expect(body.locator('li[data-type="taskItem"]')).toHaveCount(1);
+      await expect(body.getByRole('checkbox')).not.toBeChecked();
+    }
   }
   const repairedId = await bodyA.locator('p').getAttribute('data-id');
   expect(repairedId).toBeTruthy();
   expect(originalIds).not.toContain(repairedId);
   await expect(bodyB.locator('p')).toHaveAttribute('data-id', repairedId!);
-  await appendToBody(peer.page, 'After concurrent deletion');
+  if (container === 'taskList') {
+    // Edit the repaired item itself. Clicking below a checklist and moving
+    // to the document end may intentionally create another item/paragraph.
+    await bodyB.locator('p').click();
+    await peer.page.keyboard.insertText('After concurrent deletion');
+  } else await appendToBody(peer.page, 'After concurrent deletion');
   await expectServerSaved(peer.page);
   await expectDocumentText(bodyA, 'After concurrent deletion');
-  await appendToBody(author.page, ' and another edit');
+  if (container === 'taskList') {
+    await bodyA.locator('p').click();
+    await bodyA.press('End');
+    await author.page.keyboard.insertText(' and another edit');
+  } else await appendToBody(author.page, ' and another edit');
   for (const page of [author.page, peer.page]) await expectServerSaved(page);
   await Promise.all([author.page.reload(), peer.page.reload()]);
   for (const page of [author.page, peer.page]) {
@@ -233,6 +266,7 @@ test('concurrent offline deletions recover an editable body and drain subsequent
   }
   await expect.poll(async () => (await (await request.get('http://127.0.0.1:3002/api/test/metrics')).json()).pendingCount).toBe(0);
 });
+}
 
 test('same batch is idempotent and reuse with different bytes is rejected', async () => {
   const wire = await openRawSyncConnection();
@@ -480,4 +514,160 @@ test('hash shortcuts create all supported heading levels', async ({ browser }) =
     await body.press('Enter');
   }
   await expect(body.locator('p')).toHaveCount(1);
+});
+
+test('a selected pair of paragraphs converts to tasks and back without replacing their text IDs', async ({ browser }) => {
+  const { page } = await openPage(browser);
+  const body = page.getByRole('textbox', { name: 'Page body', exact: true });
+  await body.fill('First selected paragraph');
+  await page.getByRole('button', { name: 'Paragraph', exact: true }).click();
+  await body.press('ControlOrMeta+End');
+  await body.press('Enter');
+  await page.keyboard.insertText('Second selected paragraph');
+  await expect(body.locator('p')).toHaveCount(2);
+  const textIds = await body.locator('p').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')));
+  await body.press('ControlOrMeta+a');
+  await page.getByRole('button', { name: 'To-do list', exact: true }).click();
+  await expect(body.locator('li[data-type="taskItem"]')).toHaveCount(2);
+  await expect(body.getByRole('checkbox', { checked: false })).toHaveCount(2);
+  expect(await body.locator('p').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')))).toEqual(textIds);
+  await expectDocumentContains(body, 'First selected paragraph');
+  await expectDocumentContains(body, 'Second selected paragraph');
+  await body.press('ControlOrMeta+a');
+  await page.getByRole('button', { name: 'Paragraph', exact: true }).click();
+  await expect(body.locator('ul')).toHaveCount(0);
+  await expect(body.locator(':scope > p')).toHaveCount(2);
+  expect(await body.locator('p').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')))).toEqual(textIds);
+  await expectDocumentContains(body, 'First selected paragraph');
+  await expectDocumentContains(body, 'Second selected paragraph');
+  await expectServerSaved(page);
+});
+
+test('flat task lists support shortcuts, keyboard checks, split/merge, conversion and fresh pasted IDs', async ({ browser }) => {
+  const { page } = await openPage(browser);
+  const body = page.getByRole('textbox', { name: 'Page body', exact: true });
+  const items = body.locator('li[data-type="taskItem"]');
+  await body.fill('');
+  await body.pressSequentially('[ ] ');
+  await page.keyboard.insertText('First task');
+  await expect(items).toHaveCount(1);
+  const firstId = await items.first().getAttribute('data-id');
+  await expect(items.first().getByRole('checkbox')).toHaveAccessibleName('Complete task: First task');
+  await items.first().getByRole('checkbox').focus();
+  await page.keyboard.press('Space');
+  await expect(items.first().getByRole('checkbox')).toBeChecked();
+  await expect(items.first().getByRole('checkbox')).toBeFocused();
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(items.first().getByRole('checkbox')).not.toBeChecked();
+  await expectDocumentContains(body, 'First task');
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  await expect(items.first().getByRole('checkbox')).toBeChecked();
+
+  await body.focus();
+  await body.press('ControlOrMeta+End');
+  await body.press('Enter');
+  await page.keyboard.insertText('Second task');
+  await expect(items).toHaveCount(2);
+  await expect(items.nth(1).getByRole('checkbox')).not.toBeChecked();
+  expect(await items.nth(1).getAttribute('data-id')).not.toBe(firstId);
+  await expectServerSaved(page);
+  await page.waitForTimeout(550);
+  await body.press('Home');
+  await body.press('Backspace');
+  await expect(items).toHaveCount(1);
+  await expectDocumentContains(items.first().locator('p'), 'First taskSecond task');
+  await body.press('ControlOrMeta+z');
+  await expect(items).toHaveCount(2);
+
+  await body.press('ControlOrMeta+End');
+  await body.press('Enter');
+  await expect(items).toHaveCount(3);
+  await body.press('Enter');
+  await expect(items).toHaveCount(2);
+  await page.keyboard.insertText('Convertible paragraph');
+  await page.getByRole('button', { name: 'To-do list', exact: true }).click();
+  await expect(items).toHaveCount(3);
+  await page.getByRole('button', { name: 'Paragraph', exact: true }).click();
+  await expect(items).toHaveCount(2);
+  await expectDocumentContains(body.locator(':scope > p').last(), 'Convertible paragraph');
+  await page.getByRole('button', { name: 'To-do list', exact: true }).click();
+  await page.getByRole('button', { name: 'Heading 2', exact: true }).click();
+  await expect(items).toHaveCount(2);
+  await expectDocumentText(body.locator(':scope > h2'), 'Convertible paragraph');
+
+  await body.press('ControlOrMeta+End');
+  await body.press('Enter');
+  await body.evaluate(element => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/html', '<ul data-type="taskList" data-id="copied-list"><li data-type="taskItem" data-checked="true" data-id="copied-item"><p data-id="copied-text">Pasted checked task</p></li><li data-type="taskItem" data-checked="false" data-id="copied-item"><p data-id="copied-text">Pasted unchecked task</p></li></ul>');
+    clipboardData.setData('text/plain', 'Pasted checked task\nPasted unchecked task');
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+  });
+  await expect(items).toHaveCount(4);
+  await expect(body.getByRole('checkbox', { name: 'Complete task: Pasted checked task', exact: true })).toBeChecked();
+  await expect(body.getByRole('checkbox', { name: 'Complete task: Pasted unchecked task', exact: true })).not.toBeChecked();
+  await expectDocumentContains(body, 'Pasted checked task');
+  await expectDocumentContains(body, 'Pasted unchecked task');
+  expect(await items.first().getAttribute('data-id')).toBe(firstId);
+  const ids = await body.locator('p, h1, h2, h3, ul[data-type="taskList"], li[data-type="taskItem"]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')));
+  expect(ids.every(Boolean)).toBe(true);
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(ids.some(id => id?.startsWith('copied-'))).toBe(false);
+
+  await body.press('ControlOrMeta+End');
+  await body.press('Enter');
+  await body.press('Enter');
+  await body.pressSequentially('[x] ');
+  await page.keyboard.insertText('Already completed');
+  await expect(body.getByRole('checkbox', { name: 'Complete task: Already completed', exact: true })).toBeChecked();
+  await body.press('Tab');
+  await expect(body.locator('li ul')).toHaveCount(0);
+  await expectServerSaved(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.screenshot({ path: 'test-results/fixture/task-lists-light-desktop.png', fullPage: true });
+  await page.getByRole('button', { name: 'Switch to dark mode', exact: true }).click();
+  await page.screenshot({ path: 'test-results/fixture/task-lists-dark-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 320, height: 760 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/fixture/task-lists-dark-mobile.png', fullPage: true });
+});
+
+test('a lost checkbox acknowledgement retries one durable batch and preserves checked state and identity', async ({ browser, request }) => {
+  const { page } = await openPage(browser);
+  const body = page.getByRole('textbox', { name: 'Page body', exact: true });
+  await body.fill('Durable checkbox');
+  await body.focus();
+  await page.getByRole('button', { name: 'Paragraph', exact: true }).click();
+  await page.getByRole('button', { name: 'To-do list', exact: true }).click();
+  const item = body.locator('li[data-type="taskItem"]').first();
+  await expect(item.getByRole('checkbox')).not.toBeChecked();
+  await expectServerSaved(page);
+  const id = await item.getAttribute('data-id');
+  const before = Number((await pool.query('SELECT count(*) FROM receipts WHERE page_id=$1', [DEV_PAGE_ID])).rows[0].count);
+  expect((await request.post('http://127.0.0.1:3002/api/test/faults', { data: { dropNextAck: true } })).ok()).toBe(true);
+  await item.getByRole('checkbox').click();
+  await expectServerSaved(page);
+  expect(Number((await pool.query('SELECT count(*) FROM receipts WHERE page_id=$1', [DEV_PAGE_ID])).rows[0].count)).toBe(before + 1);
+  await page.reload();
+  await expectServerSaved(page);
+  await expect(item.getByRole('checkbox')).toBeChecked();
+  expect(await item.getAttribute('data-id')).toBe(id);
+  await expectDocumentContains(body, 'Durable checkbox');
+  // Reloading a task-first document must place the initial text selection
+  // inside its paragraph rather than in the non-text list wrapper.
+  await page.getByRole('textbox', { name: 'Page title', exact: true }).click();
+  await page.keyboard.press('Tab');
+  await expect(body).toBeFocused();
+  expect(await body.evaluate(element => {
+    const editor = (element as HTMLElement & {
+      editor: { state: { selection: { $from: { parent: { inlineContent: boolean } }; $to: { parent: { inlineContent: boolean } } } } };
+    }).editor;
+    return editor.state.selection.$from.parent.inlineContent && editor.state.selection.$to.parent.inlineContent;
+  })).toBe(true);
+  await page.keyboard.insertText('Reloaded task edit. ');
+  await expectDocumentContains(item.locator('p'), 'Reloaded task edit. ');
+  await expectDocumentContains(item.locator('p'), 'Durable checkbox');
+  expect(await item.getAttribute('data-id')).toBe(id);
+  await expect(item.getByRole('checkbox')).toBeChecked();
+  await expectServerSaved(page);
 });
