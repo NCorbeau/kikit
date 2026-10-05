@@ -10,15 +10,13 @@ import {
   type ClientMessage,
 } from '@kikit/contracts';
 import { commitUpdate, loadPage, type CommitResult } from './persistence.js';
-import { normalizeEmptyBody, projectTitle } from './document.js';
+import { prepareCommittedUpdate } from './document-candidate.js';
 import { canAccessPage, type Principal } from './pages.js';
 import { AccessError } from './persistence-errors.js';
 import { PageQueues } from './queue.js';
 import { TestFaults } from './test-faults.js';
 import { RoomPresence } from './presence.js';
 import {
-  DependencyMissing,
-  InvalidDocument,
   isRejectedUpdate,
   reportFailure,
   sendMessage,
@@ -229,7 +227,11 @@ export class SyncRooms {
       return await commitUpdate(this.pool, pageId, principal.accountId, message.batchId, update, {
         sessionId: principal.sessionId,
         beforeCommit: this.faults.beforeCommit,
-        validate: () => prepareCommittedUpdate(room.doc, update, value => { title = value; }),
+        validate: () => {
+          const candidate = prepareCommittedUpdate(room.doc, update);
+          title = candidate.title;
+          return candidate.repairedUpdate;
+        },
         projectTitle: () => title,
         afterCommit: this.faults.afterCommit,
       });
@@ -343,24 +345,5 @@ export class SyncRooms {
     const rooms = [...this.rooms.values()];
     this.rooms.clear();
     for (const room of rooms) this.destroyRoom(room);
-  }
-}
-
-function prepareCommittedUpdate(committedDoc: Y.Doc, update: Uint8Array, onTitle: (title: string) => void): Uint8Array | void {
-  const candidate = new Y.Doc();
-  try {
-    Y.applyUpdate(candidate, Y.encodeStateAsUpdate(committedDoc));
-    Y.applyUpdate(candidate, update);
-    if (candidate.store.pendingStructs || candidate.store.pendingDs) throw new DependencyMissing();
-    const beforeRepair = Y.encodeStateVector(candidate);
-    const needsRepair = normalizeEmptyBody(candidate);
-    onTitle(projectTitle(candidate));
-    // Receipt hashes cover submitted bytes. Repairs join them in the committed payload.
-    if (needsRepair) return Y.mergeUpdates([update, Y.encodeStateAsUpdate(candidate, beforeRepair)]);
-  } catch (error) {
-    if (error instanceof DependencyMissing) throw error;
-    throw new InvalidDocument();
-  } finally {
-    candidate.destroy();
   }
 }
