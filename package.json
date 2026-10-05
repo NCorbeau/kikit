@@ -8,6 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "deploy": "tsx scripts/deploy.ts",
     "dev": "pnpm --parallel --filter './apps/*' dev",
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",

@@ -33,7 +33,30 @@ The sharing rollout applied `0002_shared_pages.sql` (database schema 3), granted
 
 Leave `KIKIT_DEV_FIXTURE` and `KIKIT_TEST_FAULTS` unset. Do not supply migration credentials to the application process. The app binds `0.0.0.0`, trusts one proxy hop, and uses HTTPS Secure cookies in production.
 
-Railway's legacy `railway.json`/`railway.toml` configuration is deprecated in the current provider documentation, so this slice uses the Dockerfile and explicit service settings. [Configuration reference](https://docs.railway.com/config-as-code/reference).
+This setup uses the Dockerfile and explicit service settings; it does not require a `railway.json` or `railway.toml` file. [Configuration reference](https://docs.railway.com/config-as-code/reference).
+
+## One-command updates
+
+Added 2026-10-05. After the setup below, run updates from the repository root:
+
+```sh
+pnpm run deploy
+```
+
+The command uploads a clean Git archive of committed `HEAD`, including migrations and matching web/server assets. It does not push Git or include uncommitted/ignored files. It refuses a dirty working tree, an unfinished app deployment, an active migration job, or another local deployment for the same project/environment. Complete the normal release checks before running it. You can preview targets with `pnpm run deploy --dry-run` without changing Railway.
+
+One-time setup:
+
+1. Install Railway CLI and run `railway login` (the command flags were checked against CLI 5.63.1). Copy `deploy.config.example.json` to ignored `deploy.config.json`; fill in the existing project, environment, app service UUIDs and exact HTTPS origin. Use service UUIDs to avoid ambiguous names. Keep automatic deployments disabled and one app replica with `/api/health` and 30-second draining as above.
+2. Create an empty service named `kikit-migrations` in the existing environment and Amsterdam region. Set its root to the repository root, use the root Dockerfile, and set its start command to `node apps/server/node_modules/tsx/dist/cli.mjs apps/server/src/migrate-deployment.ts`. Set no public domain, volume, healthcheck, scheduled trigger or GitHub automatic deployment; set its restart policy to **Never** and one replica. The script uploads source to this service each time, so it need not have a GitHub source attached. Add its UUID to the local configuration.
+3. Give only this service `NODE_ENV=production` and `KIKIT_MIGRATION_DATABASE_URL` using the existing migration role and private PostgreSQL host. Leave fixture/test flags unset. Do not put migration credentials in shared variables or the app service. The migration service retains its secret for subsequent runs, but its process exits after each job; it is not a second running app. Each release builds the snapshot for both services and consumes build/short-lived job resources within the existing plan; no new plan or cost guarantee is implied.
+4. Review runtime grants for the migrations being released. The task-list migration needs no additional grants; future new tables may. The script does not grant privileges automatically. Commit the deployment automation before its first run, so the uploaded archive contains the new migration entry point.
+
+The script checks both services before stopping the app, requests removal of the current successful app deployment, and waits until the listing reports it removed or no longer includes active deployments. It then deploys the migration job and waits for that exact deployment to reach `COMPLETED`, not just a successful build or startup. The job acquires the same database ownership lock as the app before applying migrations and holds it until completion; an old server still holding the lock makes the job fail safely. Applied migrations are validated/skipped by the existing runner. After successful job exit, the script deploys the app from the same archive, waits for its exact deployment's `SUCCESS` status and the public `/api/health` response. It retains the idle migration service for the next command. The manual temporary-service procedure below remains available.
+
+Failures stop the sequence and may leave the app offline. Inspect the named deployment in Railway before retrying `pnpm run deploy`; pending migrations are retry-safe. Do not automatically redeploy an older app against an upgraded schema. A timeout stops local polling, not the remote job or database operation. If interrupted, inspect running deployments before removing the local lock file named in the error. Coordinate operators: the local lock does not serialize deployment commands from different computers, and this script must not run alongside dashboard deployments or another release process. Hosted validation of this automation remains pending.
+
+Provider command references: [upload](https://docs.railway.com/cli/up), [deployment listing](https://docs.railway.com/cli/deployment), [stop](https://docs.railway.com/cli/down).
 
 ## Migration and runtime roles
 
