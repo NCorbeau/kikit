@@ -3,7 +3,6 @@ import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import { fileURLToPath } from 'node:url';
 import type { WebSocket } from 'ws';
-import type { PoolClient } from 'pg';
 import { DATABASE_SCHEMA_VERSION, MAX_WIRE_BYTES } from '@kikit/contracts';
 import { DEFAULT_DATABASE_URL, accountConfig, fixtureEnabled, isLoopback, requireLoopbackOrigin } from './config.js';
 import { createPool } from './persistence.js';
@@ -15,6 +14,7 @@ import { SyncRooms } from './sync-room.js';
 import { attachSyncConnection } from './sync-connection.js';
 import { registerTestRoutes, TestFaults } from './test-faults.js';
 import { registerSharingRoutes } from './sharing-routes.js';
+import { acquireServerOwnership, registerServerLifecycle } from './server-lifecycle.js';
 
 interface ServerOptions {
   databaseUrl?: string;
@@ -49,45 +49,12 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
   const rooms = new SyncRooms(pool, faults);
   const connections = new Set<WebSocket>();
   const socketPrincipals = new WeakMap<FastifyRequest, Principal>();
-  let shuttingDown = false;
-  let ownershipLost = false;
-  let expiryTimer: ReturnType<typeof setInterval> | undefined;
-  app.addHook('preClose', async () => {
-    shuttingDown = true;
-    clearInterval(expiryTimer);
-    for (const socket of connections) socket.close(1001, 'Server shutdown');
-    const closeTimer = setTimeout(() => {
-      for (const socket of connections) socket.terminate();
-    }, 1000);
-    closeTimer.unref();
-    await rooms.queues.drain();
-    clearTimeout(closeTimer);
-    for (const socket of connections) socket.terminate();
-  });
-  app.addHook('onClose', async () => {
-    rooms.destroy();
-    if (ownershipConnection) {
-      if (!ownershipLost) await ownershipConnection.query('SELECT pg_advisory_unlock(719422)').catch(() => undefined);
-      ownershipConnection.release(ownershipLost);
-    }
-    await pool.end();
-  });
-  ownershipConnection?.on('error', () => {
-    ownershipLost = true;
-    shuttingDown = true;
-    // Stop queue admission synchronously; never keep rooms alive after losing ownership.
-    void rooms.queues.drain().catch(() => undefined);
-    for (const socket of connections) socket.terminate();
-    console.error('Database ownership connection lost; stopping Kikit.');
-    void app.close().catch(() => {
-      console.error('Kikit shutdown failed.');
-    });
-  });
+  const lifecycle = registerServerLifecycle(app, pool, rooms, connections, ownershipConnection);
   try {
     await app.register(websocket, { options: { maxPayload: MAX_WIRE_BYTES } });
 
     app.addHook('onRequest', async (request, reply) => {
-      if (shuttingDown) return reply.code(503).send({ error: 'Server unavailable' });
+      if (lifecycle.shuttingDown) return reply.code(503).send({ error: 'Server unavailable' });
       if (request.url.startsWith('/api/')) {
         reply.header('Cache-Control', 'no-store');
         if (fixture && !isLoopback(request.ip)) return reply.code(403).send({ error: 'Development fixture is restricted to the local browser' });
@@ -118,7 +85,7 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
       websocket: true,
       preValidation: async (request, reply) => {
         if (request.headers.origin !== origin) return reply.code(403).send({ error: 'Origin denied' });
-        if (shuttingDown || connections.size >= MAX_CONNECTIONS) return reply.code(503).send({ error: 'Server unavailable' });
+        if (lifecycle.shuttingDown || connections.size >= MAX_CONNECTIONS) return reply.code(503).send({ error: 'Server unavailable' });
         const active = await identity(request);
         if (!active) return reply.code(401).send({ error: 'Sign in required' });
         socketPrincipals.set(request, active);
@@ -128,15 +95,7 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
       attachSyncConnection(socket, rooms, () => connections.delete(socket), socketPrincipals.get(request)!);
     });
 
-    let revalidating = false;
-    expiryTimer = auth ? setInterval(() => {
-      if (revalidating || shuttingDown) return;
-      revalidating = true;
-      void rooms.revalidate().finally(() => {
-        revalidating = false;
-      });
-    }, 10_000) : undefined;
-    expiryTimer?.unref();
+    if (auth) lifecycle.startExpiryChecks();
 
     if (options.serveWeb) {
       await app.register(fastifyStatic, { root: fileURLToPath(new URL('../../web/dist/', import.meta.url)), cacheControl: false });
@@ -148,21 +107,6 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
     return app;
   } catch (error) {
     await app.close();
-    throw error;
-  }
-}
-
-async function acquireServerOwnership(pool: ReturnType<typeof createPool>, fixture: boolean) {
-  if (fixture) return undefined;
-  let client: PoolClient | undefined;
-  try {
-    client = await pool.connect();
-    const { rows: [row] } = await client.query('SELECT pg_try_advisory_lock(719422) AS acquired');
-    if (!row.acquired) throw new Error('Another Kikit account server is active. Stop and drain it before deployment.');
-    return client;
-  } catch (error) {
-    client?.release();
-    await pool.end();
     throw error;
   }
 }

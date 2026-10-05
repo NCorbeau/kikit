@@ -1,5 +1,6 @@
 import { DOCUMENT_SCHEMA_VERSION } from '@kikit/contracts';
 import { wrap, type DBSchema, type IDBPDatabase, type IDBPTransaction } from 'idb';
+import * as Y from 'yjs';
 
 export interface StoredUpdate {
   id: string;
@@ -32,12 +33,26 @@ interface LocalDatabase extends DBSchema {
   metadata: { key: 'document'; value: Metadata };
 }
 type WriteTransaction = IDBPTransaction<LocalDatabase, ['updates', 'metadata'], 'readwrite'>;
+type ReadTransaction = IDBPTransaction<LocalDatabase, ['updates', 'metadata'], 'readonly'>;
 
 /** An incompatible cache stays untouched and can still be exported without applying it. */
 export class CacheCompatibilityError extends Error {
-  constructor(readonly recovery: StoredDocument) {
-    super('This cached page needs a different version of Kikit. Its data has been preserved.');
+  constructor(readonly recovery: StoredDocument, message = 'This cached page needs a different version of Kikit. Its data has been preserved.') {
+    super(message);
   }
+}
+
+async function readJournal(transaction: ReadTransaction | WriteTransaction): Promise<{
+  metadata: Metadata | undefined;
+  cache: StoredDocument;
+}> {
+  const [metadata, records] = await Promise.all([
+    transaction.objectStore('metadata').get('document'),
+    transaction.objectStore('updates').getAll(),
+  ]);
+  // getAll follows the numeric primary key, not the random batch UUID.
+  const updates = records.map(({ ordinal: _ordinal, ...record }) => record);
+  return { metadata, cache: { initialized: metadata?.initialized ?? false, updates } };
 }
 
 function isCompatible(metadata: Metadata): boolean {
@@ -47,6 +62,39 @@ function isCompatible(metadata: Metadata): boolean {
 
 function sameBytes(first: Uint8Array, second: Uint8Array): boolean {
   return first.length === second.length && first.every((byte, index) => byte === second[index]);
+}
+
+/** Version 1 never contained lists. Check the merged legacy view before advancing
+ * metadata; recovery retains original journal bytes even for malformed caches. */
+function isLegacyDocument(updates: StoredUpdate[]): boolean {
+  const doc = new Y.Doc();
+  try {
+    for (const record of updates) Y.applyUpdate(doc, record.update);
+    if (doc.store.pendingStructs || doc.store.pendingDs) return false;
+    if ([...doc.share.keys()].some(name => name !== 'title' && name !== 'body')) return false;
+    const title = doc.getXmlFragment('title');
+    if (title.length !== 1) return false;
+    for (const fragment of [title, doc.getXmlFragment('body')]) {
+      for (const block of fragment.toArray()) {
+        const allowed = fragment === title ? ['paragraph'] : ['paragraph', 'heading'];
+        if (!(block instanceof Y.XmlElement) || !allowed.includes(block.nodeName)) return false;
+        const attributes = block.getAttributes();
+        const allowedAttributes = fragment === title ? [] : ['id', ...(block.nodeName === 'heading' ? ['level'] : [])];
+        if (Object.keys(attributes).some(key => !allowedAttributes.includes(key))) return false;
+        if (fragment !== title && (typeof attributes.id !== 'string' || attributes.id.length < 1 || attributes.id.length > 128)) return false;
+        if (block.nodeName === 'heading' && ![1, 2, 3].includes(Number(attributes.level))) return false;
+        for (const text of block.toArray()) {
+          if (!(text instanceof Y.XmlText)
+            || text.toDelta().some((part: { insert: unknown; attributes?: Record<string, unknown> }) => typeof part.insert !== 'string' || Object.keys(part.attributes ?? {}).length)) return false;
+        }
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    doc.destroy();
+  }
 }
 
 /** Atomic records keep update bytes and pending IDs together; the generated ordinal
@@ -106,17 +154,41 @@ export class LocalStore implements DocumentStore {
 
   async load(): Promise<StoredDocument> {
     const database = await this.database();
-    const transaction = database.transaction(['metadata', 'updates'], 'readonly');
-    const [metadata, records] = await Promise.all([
-      transaction.objectStore('metadata').get('document'),
-      transaction.objectStore('updates').getAll(),
-      transaction.done,
-    ]);
-    // getAll follows the numeric primary key, not the random batch UUID.
-    const updates = records.map(({ ordinal: _ordinal, ...record }) => record);
-    const cache = { initialized: metadata?.initialized ?? false, updates };
-    if (metadata && !isCompatible(metadata)) throw new CacheCompatibilityError(cache);
-    return cache;
+    // Hydration and recovery remain readable even when the browser denies writes.
+    const read = database.transaction(['updates', 'metadata'], 'readonly');
+    const [{ metadata, cache }] = await Promise.all([readJournal(read), read.done]);
+    if (!metadata || isCompatible(metadata)) return cache;
+    if (metadata.schemaVersion !== 1 || metadata.formatVersion !== LOCAL_FORMAT_VERSION) {
+      throw new CacheCompatibilityError(cache);
+    }
+    return this.upgradeLegacyCache(database, cache);
+  }
+
+  private async upgradeLegacyCache(database: IDBPDatabase<LocalDatabase>, recovery: StoredDocument): Promise<StoredDocument> {
+    // The document schema is metadata, separate from the unchanged IDB format.
+    // Re-read under the exclusive transaction: another tab may have appended
+    // legacy edits or completed its upgrade after our first readonly snapshot.
+    let transaction: WriteTransaction | undefined;
+    let settled: Promise<void> | undefined;
+    try {
+      transaction = database.transaction(['updates', 'metadata'], 'readwrite', { durability: 'strict' });
+      settled = transaction.done.catch(() => {});
+      const { metadata, cache } = await readJournal(transaction);
+      recovery = cache;
+      if (metadata && !isCompatible(metadata)) {
+        if (metadata.schemaVersion !== 1 || metadata.formatVersion !== LOCAL_FORMAT_VERSION
+          || ((cache.initialized || cache.updates.length > 0) && !isLegacyDocument(cache.updates))) throw new CacheCompatibilityError(cache);
+        await transaction.objectStore('metadata').put({ ...metadata, schemaVersion: DOCUMENT_SCHEMA_VERSION });
+      }
+      await transaction.done;
+      return cache;
+    } catch (error) {
+      try { transaction?.abort(); } catch { /* already completed or aborted */ }
+      await settled;
+      if (error instanceof CacheCompatibilityError) throw error;
+      throw new CacheCompatibilityError(recovery,
+        'This cached page could not be upgraded on this device. Its data has been preserved; retry or export recovery.');
+    }
   }
 
   async append(record: StoredUpdate, initialized = false): Promise<void> {

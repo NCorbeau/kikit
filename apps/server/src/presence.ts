@@ -1,7 +1,4 @@
-import { createHash } from 'node:crypto';
 import { MAX_PRESENCE_BYTES } from '@kikit/contracts';
-import * as decoding from 'lib0/decoding';
-import * as encoding from 'lib0/encoding';
 import {
   Awareness,
   applyAwarenessUpdate,
@@ -12,129 +9,13 @@ import type * as Y from 'yjs';
 import type { WebSocket } from 'ws';
 import type { Principal } from './pages.js';
 import { InvalidDocument } from './sync-protocol.js';
+import { decodePresenceFrame, encodePresenceFrame } from './presence-frame.js';
 
 const MAX_FRAMES_PER_SECOND = 20;
 const MAX_RETIRED_CLIENTS = 256;
-const UINT32_MAX = 0xffff_ffff;
-const COLORS = ['#2563eb', '#0f766e', '#9333ea', '#b45309', '#be123c', '#0369a1'];
-
-type JsonObject = Record<string, unknown>;
-type RelativeId = { client: number; clock: number };
-type RelativePosition = {
-  type?: RelativeId;
-  tname?: 'title' | 'body';
-  item?: RelativeId;
-  assoc: number;
-};
-type Cursor = { anchor: RelativePosition; head: RelativePosition };
-type ParticipantIdentity = { accountId: string; name: string; color: string };
-type PresenceState = { user: ParticipantIdentity; cursor?: Cursor | null };
-type PresenceFrame = { clientId: number; clock: number; state: PresenceState | null };
 type SocketBinding = { clientId: number; accountId: string };
 type FrameRate = { started: number; frames: number };
 type AwarenessChange = { added: number[]; updated: number[]; removed: number[] };
-
-function invalid(): never {
-  throw new InvalidDocument();
-}
-
-function parseObject(value: unknown): JsonObject {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) invalid();
-  return value as JsonObject;
-}
-
-function requireAllowedKeys(value: JsonObject, allowed: readonly string[]): void {
-  if (Object.keys(value).some(key => !allowed.includes(key))) invalid();
-}
-
-function parseUint32(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > UINT32_MAX) invalid();
-  return value;
-}
-
-function parseRelativeId(value: unknown): RelativeId {
-  const parsed = parseObject(value);
-  requireAllowedKeys(parsed, ['client', 'clock']);
-  return { client: parseUint32(parsed.client), clock: parseUint32(parsed.clock) };
-}
-
-function parseRelativePosition(value: unknown): RelativePosition {
-  const parsed = parseObject(value);
-  requireAllowedKeys(parsed, ['type', 'tname', 'item', 'assoc']);
-  const position: RelativePosition = { assoc: 0 };
-
-  if (parsed.type != null) position.type = parseRelativeId(parsed.type);
-  if (parsed.item != null) position.item = parseRelativeId(parsed.item);
-  if (parsed.tname != null) {
-    if (parsed.tname !== 'title' && parsed.tname !== 'body') invalid();
-    position.tname = parsed.tname;
-  }
-  if (parsed.assoc != null) {
-    if (typeof parsed.assoc !== 'number'
-      || !Number.isInteger(parsed.assoc)
-      || parsed.assoc < -1
-      || parsed.assoc > 1) invalid();
-    position.assoc = parsed.assoc;
-  }
-
-  const hasLocation = position.type || position.tname || position.item;
-  if (!hasLocation || (position.type && position.tname)) invalid();
-  return position;
-}
-
-function parseCursor(value: unknown): Cursor | null {
-  if (value === null) return null;
-  const parsed = parseObject(value);
-  requireAllowedKeys(parsed, ['anchor', 'head']);
-  return {
-    anchor: parseRelativePosition(parsed.anchor),
-    head: parseRelativePosition(parsed.head),
-  };
-}
-
-function participantIdentity(principal: Principal): ParticipantIdentity {
-  const name = (principal.name || principal.email || 'Participant')
-    .replace(/[\u0000-\u001f\u007f]/g, '')
-    .trim()
-    .slice(0, 80) || 'Participant';
-  const colorIndex = createHash('sha256').update(principal.accountId).digest().readUInt32BE(0) % COLORS.length;
-  return { accountId: principal.accountId, name, color: COLORS[colorIndex]! };
-}
-
-function canonicalizeState(value: unknown, principal: Principal): PresenceState | null {
-  if (value === null) return null;
-  const parsed = parseObject(value);
-  requireAllowedKeys(parsed, ['user', 'cursor']);
-  // Claimed user data is discarded; only the authenticated principal supplies identity.
-  return {
-    user: participantIdentity(principal),
-    ...('cursor' in parsed ? { cursor: parseCursor(parsed.cursor) } : {}),
-  };
-}
-
-/** Validate the complete frame before reserving an ID or changing Awareness. */
-function decodeFrame(update: Uint8Array, principal: Principal): PresenceFrame {
-  try {
-    const decoder = decoding.createDecoder(update);
-    if (decoding.readVarUint(decoder) !== 1) invalid();
-    const clientId = parseUint32(decoding.readVarUint(decoder));
-    const clock = parseUint32(decoding.readVarUint(decoder));
-    const state = canonicalizeState(JSON.parse(decoding.readVarString(decoder)), principal);
-    if (decoding.hasContent(decoder)) invalid();
-    return { clientId, clock, state };
-  } catch {
-    invalid();
-  }
-}
-
-function encodeFrame({ clientId, clock, state }: PresenceFrame): Uint8Array {
-  const encoder = encoding.createEncoder();
-  encoding.writeVarUint(encoder, 1);
-  encoding.writeVarUint(encoder, clientId);
-  encoding.writeVarUint(encoder, clock);
-  encoding.writeVarString(encoder, JSON.stringify(state));
-  return encoding.toUint8Array(encoder);
-}
 
 /** Transient, socket-owned awareness. Authorization and ordering belong to SyncRooms. */
 export class RoomPresence {
@@ -156,12 +37,12 @@ export class RoomPresence {
   /** Over-budget cursor motion is dropped; malformed or impersonating frames fail. */
   accept(socket: WebSocket, principal: Principal, update: Uint8Array): void {
     if (this.destroyed) return;
-    if (update.byteLength > MAX_PRESENCE_BYTES) invalid();
+    if (update.byteLength > MAX_PRESENCE_BYTES) throw new InvalidDocument();
     if (!this.admitFrame(socket)) return;
 
-    const frame = decodeFrame(update, principal);
+    const frame = decodePresenceFrame(update, principal);
     this.reserveClientId(socket, principal, frame.clientId);
-    applyAwarenessUpdate(this.awareness, encodeFrame(frame), socket);
+    applyAwarenessUpdate(this.awareness, encodePresenceFrame(frame), socket);
   }
 
   remove(socket: WebSocket): void {
@@ -198,9 +79,9 @@ export class RoomPresence {
 
   private reserveClientId(socket: WebSocket, principal: Principal, clientId: number): void {
     const binding = this.bindings.get(socket);
-    if (clientId === this.awareness.clientID) invalid();
-    if (binding && (binding.clientId !== clientId || binding.accountId !== principal.accountId)) invalid();
-    if (this.owners.has(clientId) && this.owners.get(clientId) !== socket) invalid();
+    if (clientId === this.awareness.clientID) throw new InvalidDocument();
+    if (binding && (binding.clientId !== clientId || binding.accountId !== principal.accountId)) throw new InvalidDocument();
+    if (this.owners.has(clientId) && this.owners.get(clientId) !== socket) throw new InvalidDocument();
 
     // A null state or timeout does not release a live socket's reserved ID.
     if (!binding) {

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import * as Y from 'yjs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEV_ACCOUNT_ID, DEV_PAGE_ID } from '@kikit/contracts';
+import { DATABASE_SCHEMA_VERSION, DEV_ACCOUNT_ID, DEV_PAGE_ID, DOCUMENT_SCHEMA_VERSION } from '@kikit/contracts';
 import { createSeed } from './document.js';
 import { seedDevelopmentPage } from './development-seed.js';
 import { migrateDatabase } from './migrations.js';
@@ -78,14 +78,19 @@ describe.skipIf(!databaseUrl)('SQL migrations on PostgreSQL', () => {
     await pool.query('INSERT INTO pages (id, owner_id, schema_version, initial_state) VALUES ($1,$2,1,$3)', [DEV_PAGE_ID, DEV_ACCOUNT_ID, Buffer.from(createSeed())]);
     await pool.query("INSERT INTO page_grants (page_id, account_id, role) VALUES ($1,$2,'owner')", [DEV_PAGE_ID, DEV_ACCOUNT_ID]);
     const original = (await pool.query('SELECT initial_state FROM pages')).rows[0].initial_state;
-    const { doc } = await loadPage(pool, DEV_PAGE_ID, DEV_ACCOUNT_ID);
+    const doc = new Y.Doc();
+    Y.applyUpdate(doc, original);
     const beforeEdit = Y.encodeStateVector(doc);
     const text = (doc.getXmlFragment('body').get(0) as Y.XmlElement).get(0) as Y.XmlText;
     text.insert(0, 'Existing note. ');
     const update = Y.encodeStateAsUpdate(doc, beforeEdit);
     doc.destroy();
     const batchId = randomUUID();
-    await commitUpdate(pool, DEV_PAGE_ID, DEV_ACCOUNT_ID, batchId, update);
+    // This fixture was created by the old version, before current-version APIs
+    // would accept it. Retain its original update and payload-hashed receipt.
+    await pool.query('INSERT INTO document_updates (page_id, sequence, payload) VALUES ($1,1,$2)', [DEV_PAGE_ID, Buffer.from(update)]);
+    await pool.query('INSERT INTO receipts (page_id, batch_id, payload_hash, sequence) VALUES ($1,$2,$3,1)', [DEV_PAGE_ID, batchId, createHash('sha256').update(update).digest('hex')]);
+    await pool.query('UPDATE pages SET sequence=1 WHERE id=$1', [DEV_PAGE_ID]);
     await migrateDatabase(pool);
     await seedDevelopmentPage(pool);
     expect((await pool.query('SELECT initial_state, sequence FROM pages')).rows[0]).toEqual({ initial_state: original, sequence: '1' });
@@ -93,6 +98,39 @@ describe.skipIf(!databaseUrl)('SQL migrations on PostgreSQL', () => {
     expect((await pool.query('SELECT batch_id FROM receipts')).rows[0].batch_id).toBe(batchId);
     const replay = await commitUpdate(pool, DEV_PAGE_ID, DEV_ACCOUNT_ID, batchId, update);
     expect(replay).toEqual({ sequence: 1, duplicate: true });
+  });
+
+  it('upgrades schema-1 metadata without rewriting committed state, history or receipts', async () => {
+    const journalPath = join(temporaryFolder, 'meta/_journal.json');
+    const journal = JSON.parse(await readFile(journalPath, 'utf8'));
+    journal.entries = journal.entries.slice(0, 3);
+    await writeFile(journalPath, JSON.stringify(journal));
+    await migrateDatabase(pool, temporaryFolder);
+    const initial = Buffer.from(createSeed('Legacy note', 'Original content'));
+    await pool.query('INSERT INTO pages (id, owner_id, schema_version, initial_state) VALUES ($1,$2,1,$3)', [DEV_PAGE_ID, DEV_ACCOUNT_ID, initial]);
+    await pool.query("INSERT INTO page_grants (page_id, account_id, role) VALUES ($1,$2,'owner')", [DEV_PAGE_ID, DEV_ACCOUNT_ID]);
+    const doc = new Y.Doc();
+    Y.applyUpdate(doc, initial);
+    const before = Y.encodeStateVector(doc);
+    ((doc.getXmlFragment('body').get(0) as Y.XmlElement).get(0) as Y.XmlText).insert(0, 'Pending old version edit. ');
+    const update = Y.encodeStateAsUpdate(doc, before);
+    const batchId = randomUUID();
+    await pool.query('INSERT INTO document_updates (page_id, sequence, payload) VALUES ($1,1,$2)', [DEV_PAGE_ID, Buffer.from(update)]);
+    await pool.query('INSERT INTO receipts (page_id, batch_id, payload_hash, sequence) VALUES ($1,$2,$3,1)', [DEV_PAGE_ID, batchId, createHash('sha256').update(update).digest('hex')]);
+    await pool.query('UPDATE pages SET sequence=1 WHERE id=$1', [DEV_PAGE_ID]);
+    const updates = (await pool.query('SELECT * FROM document_updates')).rows;
+    const receipts = (await pool.query('SELECT * FROM receipts')).rows;
+    await migrateDatabase(pool);
+    expect((await pool.query('SELECT * FROM schema_versions')).rows).toEqual([{ version: DATABASE_SCHEMA_VERSION }]);
+    expect((await pool.query('SELECT initial_state, schema_version, sequence FROM pages')).rows[0])
+      .toEqual({ initial_state: initial, schema_version: DOCUMENT_SCHEMA_VERSION, sequence: '1' });
+    expect((await pool.query('SELECT * FROM document_updates')).rows).toEqual(updates);
+    expect((await pool.query('SELECT * FROM receipts')).rows).toEqual(receipts);
+    const loaded = await loadPage(pool, DEV_PAGE_ID, DEV_ACCOUNT_ID);
+    expect(Y.encodeStateAsUpdate(loaded.doc)).toEqual(Y.encodeStateAsUpdate(doc));
+    expect(await commitUpdate(pool, DEV_PAGE_ID, DEV_ACCOUNT_ID, batchId, update)).toEqual({ sequence: 1, duplicate: true });
+    loaded.doc.destroy();
+    doc.destroy();
   });
 
   it('applies a subsequent SQL file exactly once across concurrent runners', async () => {

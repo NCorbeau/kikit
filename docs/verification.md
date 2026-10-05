@@ -296,3 +296,37 @@ A temporary-harness assertion initially assumed one participant entry per accoun
 Cleanup disabled the test invitation, removed its editor membership, signed out all three sessions, and verified that replaying each old cookie returned 401. The isolated browser closed; recovery downloads were removed and in-memory recovery was discarded. Two new synthetic notes remain because note deletion is not implemented. The user's primary session and real notes were untouched by the test flow.
 
 This completes the hosted sharing rollout/proof tracked by MAC-115 under these conditions. Natural hosted session renewal/expiry, deletion/retention policy, scheduled backups and hosted restore, wider failure/browser/accessibility checks, performance, recovery import and compaction remain separate work. Disposable test-note use still has no tested hosted recovery guarantee; this checkpoint does not declare the entire v1 release complete.
+
+## 2026-10-04: locally implemented flat to-do lists
+
+The user approved simple checkbox lists inside notes and then authorized implementation with agents followed by review. This slice was implemented on main baseline `e22fe79` in the uncommitted working tree. Independent editor/schema reviews found no remaining actionable defects. Existing layout and workspace-navigation changes were preserved; the checks below exercised the combined working tree. No commit, merge or deployment was performed.
+
+Executed on macOS/Apple Silicon with Node 24.21.0, pnpm 12.5.1, local PostgreSQL 17.9 and Playwright 1.63.0 / Chromium. Database and browser suites ran sequentially with disposable local data. The authenticated suite served production assets and used distinct Better Auth accounts with captured magic-link delivery; this is separate from actual hosted email and Railway proof.
+
+| Check | Result |
+| --- | --- |
+| `pnpm install --frozen-lockfile` | Passed |
+| `pnpm typecheck` | Passed |
+| `pnpm test` | 106 passed; 38 opt-in PostgreSQL checks skipped |
+| `pnpm test:integration` | All 38 passed: 7 accounts, 9 persistence/WebSocket, 7 migrations, 10 sharing, 5 presence |
+| `pnpm test:e2e` | All 22 editor/failure/recovery scenarios passed |
+| `pnpm test:e2e:accounts` | All 9 passed: 2 accounts, 6 sharing, 1 presence |
+| `COMPOSE_PROJECT_NAME=kikit pnpm test:restore` | Passed, including checked-task restoration, exact record fingerprints, receipt replay, continued writes and runtime DDL denial |
+| `pnpm build` | Passed; 870.71 kB before gzip, 265.64 kB gzip, existing Vite large-chunk advisory |
+| `git diff --check` | Passed |
+
+Task validation checks accept only flat lists with stable IDs, boolean checked state and one plain-text paragraph per item. They reject nesting, marks, extra attributes and malformed containers. Migration checks preserve initial document bytes, binary updates, receipts and existing account/access records while advancing document metadata to schema 2 and database compatibility to 4; wire protocol remains 2. Browser cache tests retain legacy journal bytes, insertion order, pending flags and batch identities, including upgrade failures, concurrent-tab writes, stale schema-1 writers and readable recovery when storage writes are denied.
+
+Browser checks cover selected-block conversion with retained text IDs, typing shortcuts, keyboard checkbox activation/focus, split/merge, empty-item exit, paragraph/heading conversion, pasted checked state with fresh IDs, local toggle undo and lost-acknowledgement receipt reuse. Two distinct authenticated collaborators retain simultaneous text edits and checkbox updates; local undo preserves the peer's text. A real offline shell reload preserves checked state, text and original pending identities, then reconnects to exactly one receipt per pending batch.
+
+Concurrent offline deletion of all task items exposed two editor-binding behaviors: strict client cardinality discarded empty CRDT wrappers, and Tiptap's local select-all clearing also ran on committed remote repair. Transient empty-container support and remote clearing metadata now retain the shared list until its durable server repair. The regression verifies matching repaired IDs, cursor-only activity, native clicking/typing in the repaired empty task, subsequent edits from both peers, reload and a drained journal. Task-first hydration also resolves invalid initial text-selection endpoints; native title-to-body Tab and immediate typing preserve the original checked task after reload.
+
+The first authenticated run stopped at a test-only recovery-download selector: it used the blocked-screen button name while the live editor was open. Correcting only that selector produced a full nine-scenario passing rerun. The fixture suite logged expected disconnect proxy errors and an upstream initial TextSelection warning; the selection is corrected before user editing, and all caret/recovery assertions passed. These logs are not a durable-save failure.
+
+Inspected synthetic light/dark desktop and 320px dark screenshots from the passing editor run. Checkboxes and wrapped text stay aligned, and the 320px viewport has no horizontal overflow. Screenshots remain in ignored local `.artifacts/task-lists/`. This is Chromium evidence rather than a full screen-reader, native IME, mobile-keyboard or cross-browser audit.
+
+The [task-list contract](task-lists-contract.md) records the implementation and upgrade boundaries. The normal development database was not migrated by these checks. Run the new migration before starting matching local assets; hosted rollout requires separate authorization, stopping/draining the old server and matching new assets. The recorded hosted build above remains document schema 1/database schema 3. Hosted task-list checks, broader accessibility/browser evidence, performance and the existing unreleased recovery/backup gates remain separate work.
+
+### PR preparation on 2026-10-04
+
+Prepared `dev/flat-todo-lists` and rebased it onto main `121ecb8`, which already contains the separate mobile-spacing and saved-note-navigation changes. The remaining local account-panel styling is excluded from this feature commit. An isolated export of the PR tree passed typecheck, all 106 fast tests, build and both full browser suites (22 editor scenarios and nine authenticated scenarios). The build is 870.71 kB before gzip/265.64 kB gzip with the existing chunk advisory. PostgreSQL integration and restore results above were not rerun for PR preparation; their source and migration content are unchanged. The earlier uncommitted checkpoint remains historical evidence. No merge or deployment is part of PR preparation.

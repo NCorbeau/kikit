@@ -1,4 +1,5 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useRef } from 'react';
+import { containDialogFocus } from '../components/dialog-focus';
 import type { WorkspaceExitIntent } from './useWorkspaceExit';
 
 interface LeavePageDialogProps {
@@ -31,7 +32,7 @@ export function LeavePageDialog({
       className="leave-dialog"
       aria-labelledby="leave-title"
       onCancel={event => { event.preventDefault(); onCancel(); }}
-      onKeyDown={containKeyboardFocus}
+      onKeyDown={containDialogFocus}
     >
       <h2 id="leave-title">{title}</h2>
       <p>
@@ -61,19 +62,4 @@ function exitCopy(intent: WorkspaceExitIntent) {
     if (intent.route.kind === 'page') return { title: 'Open another note?', action: 'Open note' };
   }
   return { title: 'Return to your notes?', action: 'Open notes' };
-}
-
-function containKeyboardFocus(event: KeyboardEvent<HTMLDialogElement>) {
-  if (event.key !== 'Tab') return;
-  const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
-  const first = buttons[0];
-  const last = buttons[buttons.length - 1];
-
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last?.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first?.focus();
-  }
 }

@@ -115,6 +115,8 @@ test('production build: magic links, isolated accounts, cross-device sync, offli
     await pageA.getByRole('button', { name: 'Continue editing', exact: true }).focus();
     await pageA.keyboard.press('Shift+Tab');
     await expect(pageA.getByRole('button', { name: 'Open notes', exact: true })).toBeFocused();
+    await pageA.keyboard.press('Tab');
+    await expect(pageA.getByRole('button', { name: 'Continue editing', exact: true })).toBeFocused();
     await pageA.getByRole('button', { name: 'Open notes', exact: true }).click();
     await expect(pageA.getByRole('heading', { name: 'Your notes' })).toBeVisible();
     await contextA.setOffline(false);

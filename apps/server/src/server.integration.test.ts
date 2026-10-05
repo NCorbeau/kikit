@@ -125,12 +125,26 @@ describe.skipIf(!databaseUrl)('PostgreSQL and WebSocket durable flow', () => {
     return { socket, next };
   }
 
-  it('commits an empty-body repair atomically and replays its original bytes under the client payload hash', async () => {
+  it.each(['body', 'taskList'])('commits an empty-%s repair atomically and replays its original bytes under the client payload hash', async container => {
     const base = new Y.Doc();
     Y.applyUpdate(base, seed);
     const second = new Y.XmlElement('paragraph');
     second.setAttribute('id', 'second');
     base.getXmlFragment('body').insert(1, [second]);
+    if (container === 'taskList') {
+      const list = new Y.XmlElement('taskList');
+      list.setAttribute('id', 'list');
+      for (let index = 0; index < 2; index++) {
+        const item = new Y.XmlElement('taskItem');
+        item.setAttribute('id', `task-${index}`);
+        item.setAttribute('checked', false as unknown as string);
+        const paragraph = new Y.XmlElement('paragraph');
+        paragraph.setAttribute('id', `paragraph-${index}`);
+        item.insert(0, [paragraph]); list.insert(index, [item]);
+      }
+      base.getXmlFragment('body').delete(0, 2);
+      base.getXmlFragment('body').insert(0, [list]);
+    }
     seed = Y.encodeStateAsUpdate(base);
     await pool.query('UPDATE pages SET initial_state=$2 WHERE id=$1', [pageId, Buffer.from(seed)]);
     const a = new Y.Doc();
@@ -138,8 +152,9 @@ describe.skipIf(!databaseUrl)('PostgreSQL and WebSocket durable flow', () => {
     Y.applyUpdate(a, seed);
     Y.applyUpdate(b, seed);
     const vector = Y.encodeStateVector(base);
-    a.getXmlFragment('body').delete(0, 1);
-    b.getXmlFragment('body').delete(1, 1);
+    const target = (doc: Y.Doc) => container === 'body' ? doc.getXmlFragment('body') : doc.getXmlFragment('body').get(0) as Y.XmlElement;
+    target(a).delete(0, 1);
+    target(b).delete(1, 1);
     const firstUpdate = Y.encodeStateAsUpdate(a, vector);
     const lastUpdate = Y.encodeStateAsUpdate(b, vector);
     app = await createServer({ databaseUrl });
@@ -190,6 +205,12 @@ describe.skipIf(!databaseUrl)('PostgreSQL and WebSocket durable flow', () => {
       expect(loaded.sequence).toBe(2);
       expect(loaded.doc.getXmlFragment('body').length).toBe(1);
       expect((loaded.doc.getXmlFragment('body').get(0) as Y.XmlElement).getAttribute('id')).toBeTruthy();
+      if (container === 'taskList') {
+        expect(target(loaded.doc).length).toBe(1);
+        const repairedItem = target(loaded.doc).get(0) as Y.XmlElement;
+        expect(repairedItem.getAttribute('checked')).toBe(false);
+        expect((repairedItem.get(0) as Y.XmlElement).getAttribute('id')).toBeTruthy();
+      }
       loaded.doc.destroy();
       last.socket.send(JSON.stringify({
         type: 'update',
@@ -208,6 +229,23 @@ describe.skipIf(!databaseUrl)('PostgreSQL and WebSocket durable flow', () => {
       a.destroy();
       b.destroy();
     }
+  });
+
+  it('rejects a protocol-2 schema-1 client before hydration or acknowledgement', async () => {
+    app = await createServer({ databaseUrl });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === 'string') throw new Error('No server address');
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/api/sync`, { origin: 'http://127.0.0.1:5173' });
+    const messages: ServerMessage[] = [];
+    socket.on('message', data => messages.push(JSON.parse(data.toString())));
+    const closed = new Promise<number>(resolve => socket.once('close', code => resolve(code)));
+    await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+    socket.send(JSON.stringify({ type: 'hello', pageId, accountId: DEV_ACCOUNT_ID, protocolVersion: PROTOCOL_VERSION, schemaVersion: 1 }));
+    expect(await closed).toBe(1008);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ type: 'error', code: 'INCOMPATIBLE', retryable: false });
+    expect((await pool.query('SELECT * FROM receipts WHERE page_id=$1', [pageId])).rows).toEqual([]);
   });
 
   it('survives termination of its own idle PostgreSQL connection and reconnects for subsequent commits', async () => {

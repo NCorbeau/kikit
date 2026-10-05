@@ -9,6 +9,7 @@ import * as Y from 'yjs';
 import { createServer } from '../apps/server/src/app.js';
 import { migrateDatabase } from '../apps/server/src/migrations.js';
 import { commitUpdate, loadPage } from '../apps/server/src/persistence.js';
+import { validateDocument } from '../apps/server/src/document.js';
 import { findInvitationPage, getSharing, replaceInvitation } from '../apps/server/src/sharing.js';
 
 type App = Awaited<ReturnType<typeof createServer>>;
@@ -144,6 +145,18 @@ async function createCommittedPage(server: App, pool: pg.Pool, session: AccountS
   const loaded = await loadPage(pool, pageId, accountId, sessionId);
   const before = Y.encodeStateVector(loaded.doc);
   (loaded.doc.getXmlFragment('title').get(0) as Y.XmlElement).insert(0, [new Y.XmlText(title)]);
+  const list = new Y.XmlElement('taskList');
+  list.setAttribute('id', randomUUID());
+  const item = new Y.XmlElement('taskItem');
+  item.setAttribute('id', randomUUID());
+  item.setAttribute('checked', true as unknown as string);
+  const paragraph = new Y.XmlElement('paragraph');
+  paragraph.setAttribute('id', randomUUID());
+  paragraph.insert(0, [new Y.XmlText('Verify restored checklist')]);
+  item.insert(0, [paragraph]);
+  list.insert(0, [item]);
+  loaded.doc.getXmlFragment('body').insert(1, [list]);
+  validateDocument(loaded.doc);
   const update = Y.encodeStateAsUpdate(loaded.doc, before);
   loaded.doc.destroy();
 
@@ -173,6 +186,13 @@ async function verifyRestoredPage(pool: pg.Pool, session: AccountSession, page: 
 
   const recovered = await loadPage(pool, pageId, accountId, sessionId);
   assert.equal(recovered.doc.getXmlFragment('title').toString(), `<paragraph>${title}</paragraph>`);
+  validateDocument(recovered.doc);
+  const list = recovered.doc.getXmlFragment('body').get(1) as Y.XmlElement;
+  const item = list.get(0) as Y.XmlElement;
+  assert.equal(list.nodeName, 'taskList');
+  assert.equal(item.nodeName, 'taskItem');
+  assert.equal(item.getAttribute('checked'), true);
+  assert.equal((item.get(0) as Y.XmlElement).get(0).toString(), 'Verify restored checklist');
   const vector = Y.encodeStateVector(recovered.doc);
   (recovered.doc.getXmlFragment('title').get(0) as Y.XmlElement).insert(1, [new Y.XmlText(' continued')]);
   const continued = Y.encodeStateAsUpdate(recovered.doc, vector);

@@ -97,6 +97,13 @@ test('invitation QR/link, secret-free login continuation, explicit join, and two
   const privateId = await createNote(owner.page, 'Owner private note', 'Visible only to its owner.');
   const pageId = await createNote(owner.page, 'Shared browser note', 'Shared starting point.');
   const { token, url } = await createInvitation(owner.page);
+  const close = sharingDialog(owner.page).getByRole('button', { name: 'Close sharing controls', exact: true });
+  const copy = sharingDialog(owner.page).getByRole('button', { name: 'Copy link', exact: true });
+  await close.focus();
+  await owner.page.keyboard.press('Shift+Tab');
+  await expect(copy).toBeFocused();
+  await owner.page.keyboard.press('Tab');
+  await expect(close).toBeFocused();
   await sharingDialog(owner.page).getByRole('button', { name: 'Copy link', exact: true }).click();
   expect(await owner.page.evaluate(() => navigator.clipboard.readText())).toBe(url);
   await closeSharing(owner.page);
@@ -151,6 +158,100 @@ test('invitation QR/link, secret-free login continuation, explicit join, and two
   await device.page.reload();
   await expectDocumentContains(pageBody(device.page), 'Member contribution.');
   await serverSaved(device.page);
+});
+
+test('two authenticated collaborators retain checklist text, local toggle undo, concurrent checks and offline drafts', async ({ browser }) => {
+  const owner = await account(browser);
+  const member = await account(browser);
+  expect(member.identity.accountId).not.toBe(owner.identity.accountId);
+  const pageId = await createNote(owner.page, 'Shared checklist', 'Prepare shared checklist');
+  await pageBody(owner.page).focus();
+  await owner.page.getByRole('button', { name: 'To-do list', exact: true }).click();
+  await pageBody(owner.page).press('ControlOrMeta+End');
+  await pageBody(owner.page).press('Enter');
+  await owner.page.keyboard.insertText('Review shared checklist');
+  await serverSaved(owner.page);
+  const { token } = await createInvitation(owner.page);
+  await closeSharing(owner.page);
+  await joinThroughUi(member.page, token);
+
+  const ownerItems = pageBody(owner.page).locator('li[data-type="taskItem"]');
+  const memberItems = pageBody(member.page).locator('li[data-type="taskItem"]');
+  await expect(ownerItems).toHaveCount(2);
+  await expect(memberItems).toHaveCount(2);
+  const originalIds = await ownerItems.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')));
+  expect(await memberItems.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')))).toEqual(originalIds);
+  const appendTask = async (page: Page, index: number, text: string) => {
+    await pageBody(page).locator('li[data-type="taskItem"] > div > p').nth(index).click();
+    await page.keyboard.press('End');
+    await page.keyboard.insertText(text);
+  };
+
+  // Separate the seed edits from this session's checkbox undo capture.
+  await owner.page.waitForTimeout(550);
+  await ownerItems.first().getByRole('checkbox').click();
+  await expect(memberItems.first().getByRole('checkbox')).toBeChecked();
+  await appendTask(member.page, 1, ' Remote text survives undo.');
+  await expectDocumentContains(pageBody(owner.page), 'Remote text survives undo.');
+  await pageBody(owner.page).press('ControlOrMeta+z');
+  for (const [page, items] of [[owner.page, ownerItems], [member.page, memberItems]] as const) {
+    await expect(items.first().getByRole('checkbox')).not.toBeChecked();
+    await expectDocumentContains(pageBody(page), 'Remote text survives undo.');
+    await serverSaved(page);
+  }
+
+  await Promise.all([
+    appendTask(owner.page, 0, ' Owner contribution.'),
+    appendTask(member.page, 0, ' Member contribution.'),
+  ]);
+  for (const page of [owner.page, member.page]) {
+    await expectDocumentContains(pageBody(page), 'Owner contribution.');
+    await expectDocumentContains(pageBody(page), 'Member contribution.');
+    await serverSaved(page);
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.offlineReady)).toBe('true');
+  }
+  // Both accounts change the same baseline checkbox without observing the other
+  // write. Neither operation may discard the concurrent task text or its ID.
+  await Promise.all([owner.context.setOffline(true), member.context.setOffline(true)]);
+  await Promise.all([ownerItems.nth(1).getByRole('checkbox').click(), memberItems.nth(1).getByRole('checkbox').click()]);
+  for (const page of [owner.page, member.page]) await expect(page.getByTestId('save-status')).toHaveText('Saved on this device');
+  await Promise.all([owner.context.setOffline(false), member.context.setOffline(false)]);
+  for (const [page, items] of [[owner.page, ownerItems], [member.page, memberItems]] as const) {
+    await serverSaved(page);
+    await expect(items.nth(1).getByRole('checkbox')).toBeChecked();
+    expect(await items.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')))).toEqual(originalIds);
+    await expectDocumentContains(pageBody(page), 'Owner contribution.');
+    await expectDocumentContains(pageBody(page), 'Member contribution.');
+  }
+
+  await member.context.setOffline(true);
+  await memberItems.nth(1).getByRole('checkbox').click();
+  await appendTask(member.page, 1, ' Offline task draft.');
+  await expect(member.page.getByTestId('save-status')).toHaveText('Saved on this device');
+  const recovery = await downloadRecovery(member.page, 'Download recovery file');
+  expect(recovery.accountId).toBe(member.identity.accountId);
+  expect(recovery.pageId).toBe(pageId);
+  expect(recovery.pending.length).toBeGreaterThan(0);
+  expect(recoveryBody(recovery)).toContain('Offline task draft.');
+  await member.page.reload();
+  await expect(member.page.getByTestId('save-status')).toHaveText('Saved on this device');
+  await expect(memberItems.nth(1).getByRole('checkbox')).not.toBeChecked();
+  await expectDocumentContains(pageBody(member.page), 'Offline task draft.');
+  expect((await downloadRecovery(member.page, 'Download recovery file')).pending).toEqual(recovery.pending);
+  await member.context.setOffline(false);
+  for (const [page, items] of [[owner.page, ownerItems], [member.page, memberItems]] as const) {
+    await serverSaved(page);
+    await expect(items.nth(1).getByRole('checkbox')).not.toBeChecked();
+    await expectDocumentContains(pageBody(page), 'Offline task draft.');
+    expect(await items.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')))).toEqual(originalIds);
+  }
+  for (const pending of recovery.pending) {
+    expect((await harness.pool.query('SELECT count(*)::int AS count FROM receipts WHERE page_id=$1 AND batch_id=$2', [pageId, pending.batchId])).rows[0].count).toBe(1);
+  }
+  await member.page.reload();
+  await serverSaved(member.page);
+  await expect(memberItems.nth(1).getByRole('checkbox')).not.toBeChecked();
+  await expectDocumentContains(pageBody(member.page), 'Offline task draft.');
 });
 
 test('owner replacement/disable invalidates join links while existing editor membership remains usable', async ({ browser }) => {
