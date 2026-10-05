@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
-import { deploy, parseConfig, type DeployActions, type Deployment } from './deploy.js';
+import { deploy } from './deployment/workflow.js';
+import { parseConfig } from './deployment/local.js';
+import type { DeployActions, Deployment } from './deployment/types.js';
 
 const config = {
   project: '11111111-1111-1111-1111-111111111111',
@@ -137,6 +139,7 @@ it('uploads committed archives to explicit targets and stops on app failure with
   try {
     mkdirSync(join(root, 'scripts'));
     writeFileSync(join(root, 'scripts/deploy.ts'), readFileSync(new URL('./deploy.ts', import.meta.url)));
+    cpSync(new URL('./deployment/', import.meta.url), join(root, 'scripts/deployment'), { recursive: true });
     writeFileSync(join(root, '.gitignore'), 'deploy.config.json\n.env\n');
     writeFileSync(join(root, 'tracked.txt'), 'committed');
     const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'ignore' });
