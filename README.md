@@ -48,6 +48,8 @@ The production server serves the built web app, authentication HTTP routes, and 
 
 Use [the deployment guide](docs/deployment.md) for Railway settings, separate database roles, email sender verification, and restore checks. [.env.example](.env.example) lists required variables using placeholders; export them or configure provider secrets. The server does not load environment files automatically. Do not enable `KIKIT_DEV_FIXTURE` on Railway.
 
+After the [one-time deployment command setup](docs/deployment.md#one-command-updates), commit your changes and run `pnpm run deploy`. It stops the old app, applies pending migrations in a separate one-shot service, deploys the same committed snapshot, and checks public health. `pnpm run deploy --dry-run` prints the plan without remote actions. This automation has local checks; it has not yet been exercised on Railway.
+
 The [account contract](docs/accounts-contract.md) describes cookies, authorization, offline account hints, and recovery. Email delivery is substituted only inside the automated test harness; there is no public test-login or magic-link discovery endpoint.
 
 ## What works

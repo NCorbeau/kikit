@@ -330,3 +330,16 @@ The [task-list contract](task-lists-contract.md) records the implementation and 
 ### PR preparation on 2026-10-04
 
 Prepared `dev/flat-todo-lists` and rebased it onto main `121ecb8`, which already contains the separate mobile-spacing and saved-note-navigation changes. The remaining local account-panel styling is excluded from this feature commit. An isolated export of the PR tree passed typecheck, all 106 fast tests, build and both full browser suites (22 editor scenarios and nine authenticated scenarios). The build is 870.71 kB before gzip/265.64 kB gzip with the existing chunk advisory. PostgreSQL integration and restore results above were not rerun for PR preparation; their source and migration content are unchanged. The earlier uncommitted checkpoint remains historical evidence. No merge or deployment is part of PR preparation.
+
+
+## 2026-10-05: Deployment command, local verification
+
+Added `pnpm run deploy` with a committed Git archive, explicit Railway project/environment/service targets, local deployment locking, stop/removal polling, a separate ownership-locked migration job, exact-deployment completion polling and public health verification. Migration failure prevents app deployment; timeout does not cancel a remote operation. Configuration and one-time idle migration-service setup are documented in `docs/deployment.md`. Migration credentials remain outside the app process.
+
+Current local checks passed: `pnpm typecheck`, `pnpm test` (121 passed; 38 PostgreSQL checks skipped), `pnpm build`, and 15 focused deployment checks. The focused checks include a fake-CLI subprocess using a temporary Git repository, verifying explicit targets, committed-only uploads, exclusion of ignored credentials/configuration, dirty-tree refusal, migration failure/startup-only status, old-deployment removal and unavailable health. CLI 5.63.1 help/source confirmed the flags and JSON output used. The existing Vite large-chunk advisory remains.
+
+No Railway service was provisioned or modified, no production migration/deployment ran, and no hosted validation is claimed. PostgreSQL/browser/restore suites were not rerun for this change. The new migration entry point reuses the existing ownership lock and migration runner; its real hosted execution remains pending. Existing uncommitted web styling was preserved.
+
+### Deployment readability follow-up · 2026-10-05
+
+Separated the command entry point, local configuration/Git archive/lock lifetime, Railway CLI/HTTP operations, and deployment sequencing into focused modules under `scripts/deployment`. The release workflow reads as preflight, stop, migrate, deploy and verify health. Existing failure/status guards and command arguments remain in place; cleanup now uses separate `finally` blocks for the snapshot and local lock. The fake-CLI test copies the modules into its isolated repository. Fresh `pnpm typecheck`, all 15 focused deployment checks and `git diff --check` passed. The full test/build results above predate this refactor; no production or database/browser/restore checks were run for it.

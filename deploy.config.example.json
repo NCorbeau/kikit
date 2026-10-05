@@ -1,0 +1,7 @@
+{
+  "project": "REPLACE_WITH_PROJECT_UUID",
+  "environment": "REPLACE_WITH_ENVIRONMENT_UUID",
+  "appService": "REPLACE_WITH_APP_SERVICE_UUID",
+  "migrationService": "REPLACE_WITH_MIGRATION_SERVICE_UUID",
+  "origin": "https://kikit.example.com"
+}
