@@ -15,11 +15,11 @@ async function main() {
     // The application lock proves the old process released ownership, and keeps
     // another app from starting until migration commit/rollback has settled.
     await migrateDatabase(pool);
-    console.info('Kikit deployment migrations completed.');
   } finally {
     ownership?.release(true);
     await pool.end();
   }
+  console.info('Kikit deployment migrations completed.');
 }
 main().catch(() => {
   console.error('Deployment migration failed. Check configuration, database access, migration history and whether the old app has drained. The app must remain stopped.');
