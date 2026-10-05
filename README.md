@@ -4,7 +4,7 @@
 
 Kikit is a small, local-first notes app built around a simple block editor. Its goal is to make writing feel immediate, keep your work safe through connection changes, and let people work together on the same page.
 
-**Status: shared pages deployed and verified on Railway.** The matching web/server build at `3353cc8` and database schema 3 are running in Amsterdam. Hosted checks on 2026-10-02 passed real email login, invitation links/QR joins, owner/editor controls, concurrent editing, private-page denial, invitation invalidation, active/offline revocation with recoverable drafts, rejoin/replay, and participants/cursors. Hosted session renewal/expiry, backups and restore remain open. See [dated evidence and conditions](docs/verification.md#2026-10-02-hosted-shared-page-rollout-and-two-account-proof). This is not the complete v1 release.
+**Status: task-list build deployed on Railway.** Merged main `d9de585` is running in Amsterdam with document schema 2, database schema 4 and wire protocol 2. The 2026-10-05 rollout verified migration, app health, shell serving and unauthenticated API denial. Hosted checklist interaction/sync remains unverified. The earlier two-account sharing proof and remaining release gates are recorded in [verification](docs/verification.md). Hosted session renewal/expiry, backups and restore remain open; this is not the complete v1 release.
 
 ![Typing in two independent Kikit windows, with edits synchronizing in both directions](docs/demos/live-sync.gif)
 
@@ -48,7 +48,7 @@ The production server serves the built web app, authentication HTTP routes, and 
 
 Use [the deployment guide](docs/deployment.md) for Railway settings, separate database roles, email sender verification, and restore checks. [.env.example](.env.example) lists required variables using placeholders; export them or configure provider secrets. The server does not load environment files automatically. Do not enable `KIKIT_DEV_FIXTURE` on Railway.
 
-After the [one-time deployment command setup](docs/deployment.md#one-command-updates), commit your changes and run `pnpm run deploy`. It stops the old app, applies pending migrations in a separate one-shot service, deploys the same committed snapshot, and checks public health. `pnpm run deploy --dry-run` prints the plan without remote actions. This automation has local checks; it has not yet been exercised on Railway.
+After the [one-time deployment command setup](docs/deployment.md#one-command-updates), commit your changes and run `pnpm run deploy`. It stops the old app, applies pending migrations in a separate one-shot service, deploys the same committed snapshot, and checks public health. `pnpm run deploy --dry-run` prints the plan without remote actions. The first hosted run applied migrations but stalled on a Railway job-status assumption; its app rollout was finished manually. Use the follow-up status correction once merged; see the dated verification record.
 
 The [account contract](docs/accounts-contract.md) describes cookies, authorization, offline account hints, and recovery. Email delivery is substituted only inside the automated test harness; there is no public test-login or magic-link discovery endpoint.
 
@@ -81,7 +81,7 @@ Authorized collaborators appear above the document with colored cursors and sele
 
 Choose **To-do list** in the formatting controls, or type `[ ] ` at the start of a paragraph. `[x] ` creates a completed item. Enter adds an unchecked item; Enter on an empty item returns to ordinary text. **Text** or a heading control converts the selected items back to ordinary blocks. Checkboxes can be focused with Tab and toggled with Space. Completed items stay in place. Lists support the same local persistence, offline recovery, synchronization and collaborative undo as text.
 
-This source adds document schema 2 and database schema 4 while retaining wire protocol 2. Existing notes and pending browser journals are upgraded without replacing binary history or batch identities. It requires a matching web/server rollout and the new migration; the recorded Railway deployment above still uses the earlier schema versions. See [the task-list contract](docs/task-lists-contract.md).
+This source adds document schema 2 and database schema 4 while retaining wire protocol 2. Existing notes and pending browser journals are upgraded without replacing binary history or batch identities. It requires a matching web/server rollout and the new migration; the 2026-10-05 Railway rollout applied these versions; hosted checklist interaction/sync remains unverified. See [the task-list contract](docs/task-lists-contract.md).
 
 ## Development identity boundary
 

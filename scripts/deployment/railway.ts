@@ -1,5 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import type { DeployActions, DeployConfig } from './types.js';
+import type { DeployActions, DeployConfig, Deployment } from './types.js';
+
+const deploymentsQuery = `query($input: DeploymentListInput!) {
+  deployments(input: $input, first: 1000) {
+    edges { node { id status deploymentStopped instances { status } } }
+  }
+}`;
 
 export function requireRailwayCli(binary: string): void {
   try {
@@ -50,9 +56,14 @@ export function createRailwayActions(
   ];
 
   return {
-    list: async service => JSON.parse(railway([
-      'deployment', 'list', ...target(service), '--limit', '1000', '--json',
-    ])),
+    list: async service => {
+      const result = JSON.parse(railway([
+        'api', deploymentsQuery, '--variables', JSON.stringify({ input: {
+          projectId: config.project, environmentId: config.environment, serviceId: service,
+        } }), '--compact',
+      ]));
+      return result.data.deployments.edges.map((edge: { node: Deployment }) => edge.node);
+    },
     stop: async service => {
       railway(['down', ...target(service), '--yes']);
     },
@@ -64,6 +75,13 @@ export function createRailwayActions(
         throw new Error('Railway did not return a deployment ID. Inspect the dashboard before retrying.');
       }
       return result.deploymentId;
+    },
+    migrationCompleted: async id => {
+      const output = railway([
+        'logs', id, ...target(config.migrationService), '--lines', '100', '--json',
+      ]);
+      return output.split('\n').filter(Boolean).some(line =>
+        JSON.parse(line).message === 'Kikit deployment migrations completed.');
     },
     healthy: () => checkHealth(config.origin),
     sleep: () => new Promise(resolve => setTimeout(resolve, 5000)),

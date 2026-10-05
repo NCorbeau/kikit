@@ -25,8 +25,10 @@ function harness(options: { migration?: string; app?: string; old?: string; heal
   const actions: DeployActions = {
     list: async service => {
       if (service === config.migrationService) {
-        if (!migrationUploaded) return [{ id: 'prior-job', status: 'COMPLETED' }];
-        return [{ id: 'new-job', status: options.migration ?? 'COMPLETED' }, { id: 'prior-job', status: 'COMPLETED' }];
+        const prior = { id: 'prior-job', status: 'SUCCESS', deploymentStopped: true, instances: [{ status: 'EXITED' }] };
+        if (!migrationUploaded) return [prior];
+        return [{ id: 'new-job', status: options.migration ?? 'SUCCESS',
+          deploymentStopped: !options.migration, instances: [{ status: options.migration ? 'RUNNING' : 'EXITED' }] }, prior];
       }
       const rows: Deployment[] = [{ id: 'old-app', status: stopped ? 'REMOVED' : options.old ?? 'SUCCESS' }];
       if (appUploaded) rows.unshift({ id: 'new-app', status: options.app ?? 'SUCCESS' });
@@ -40,6 +42,7 @@ function harness(options: { migration?: string; app?: string; old?: string; heal
       events.push('app'); appUploaded = true; return 'new-app';
     },
     healthy: async () => { events.push('health'); return options.health ?? true; },
+    migrationCompleted: async () => true,
     sleep: async () => { now += 60_000; },
     now: () => now,
     log: () => {},
@@ -84,6 +87,34 @@ describe('deployment sequencing and failure recovery', () => {
     actions.stop = async () => { throw new Error('stop failed'); };
     await expect(deploy(config, actions)).rejects.toThrow('stop failed');
     expect(events).toEqual([]);
+  });
+
+  it('does not start the app for an exited SUCCESS job without its completion marker', async () => {
+    const { actions, events } = harness();
+    actions.migrationCompleted = async () => false;
+    await expect(deploy(config, actions)).rejects.toThrow('Timed out');
+    expect(events).toEqual(['stop', 'migrate']);
+  });
+
+  it.each([
+    { deploymentStopped: false, instances: [{ status: 'EXITED' }] },
+    { deploymentStopped: true, instances: [{ status: 'RUNNING' }] },
+    { deploymentStopped: true, instances: [] },
+  ])('requires a stopped job with nonempty, fully exited instances: %j', async exitState => {
+    const { actions, events } = harness();
+    const list = actions.list;
+    actions.list = async service => (await list(service)).map(row =>
+      row.id === 'new-job' ? { ...row, ...exitState } : row);
+    await expect(deploy(config, actions)).rejects.toThrow('Timed out');
+    expect(events).toEqual(['stop', 'migrate']);
+  });
+
+  it('rejects an exited app even if Railway keeps its deployment at SUCCESS', async () => {
+    const { actions } = harness();
+    const list = actions.list;
+    actions.list = async service => (await list(service)).map(row =>
+      row.id === 'new-app' ? { ...row, deploymentStopped: true, instances: [{ status: 'EXITED' }] } : row);
+    await expect(deploy(config, actions)).rejects.toThrow('exited unexpectedly');
   });
 
   it('allows removed deployments to disappear from the provider listing', async () => {
@@ -156,8 +187,9 @@ const args = process.argv.slice(2);
 if (args[0] === '--version') process.exit(0);
 const file = ${JSON.stringify(stateFile)};
 const state = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : { events: [] };
-const service = args[args.indexOf('--service') + 1];
-if (args[args.indexOf('--project') + 1] !== ${JSON.stringify(config.project)} || args[args.indexOf('--environment') + 1] !== ${JSON.stringify(config.environment)}) process.exit(2);
+const apiInput = args[0] === 'api' ? JSON.parse(args[args.indexOf('--variables') + 1]).input : null;
+const service = apiInput?.serviceId ?? args[args.indexOf('--service') + 1];
+if ((apiInput?.projectId ?? args[args.indexOf('--project') + 1]) !== ${JSON.stringify(config.project)} || (apiInput?.environmentId ?? args[args.indexOf('--environment') + 1]) !== ${JSON.stringify(config.environment)}) process.exit(2);
 if (args[0] === 'down') { state.stopped = true; state.events.push('stop'); }
 if (args[0] === 'up') {
   if (existsSync('.env') || existsSync('deploy.config.json') || readFileSync('tracked.txt', 'utf8') !== 'committed') process.exit(3);
@@ -166,12 +198,14 @@ if (args[0] === 'up') {
   state.events.push(app ? 'app' : 'job');
   console.log(JSON.stringify({ deploymentId: app ? 'new-app' : 'new-job' }));
 }
-if (args[0] === 'deployment') {
+if (args[0] === 'api') {
   const app = service === ${JSON.stringify(config.appService)};
-  console.log(JSON.stringify(app
+  const rows = app
     ? (state.app ? [{ id: 'new-app', status: 'FAILED' }] : [{ id: 'old-app', status: state.stopped ? 'REMOVED' : 'SUCCESS' }])
-    : (state.job ? [{ id: 'new-job', status: 'COMPLETED' }] : [])));
+    : (state.job ? [{ id: 'new-job', status: 'SUCCESS', deploymentStopped: true, instances: [{status: 'EXITED'}] }] : []);
+  console.log(JSON.stringify({data:{deployments:{edges:rows.map(node => ({node}))}}}));
 }
+if (args[0] === 'logs') console.log(JSON.stringify({message:'Kikit deployment migrations completed.'}));
 writeFileSync(file, JSON.stringify(state));
 `, { mode: 0o700 });
     const result = spawnSync(process.execPath, ['--import', createRequire(import.meta.url).resolve('tsx'), 'scripts/deploy.ts'], {
