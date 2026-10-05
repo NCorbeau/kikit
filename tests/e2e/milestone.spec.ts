@@ -1,3 +1,4 @@
+import { clickHeaderAction, openHeaderMenu } from './header-actions';
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -29,6 +30,59 @@ test.afterEach(async () => {
 test.afterAll(async () => {
   await server?.close();
   await pool.end();
+});
+
+test('quiet header menu supports keyboard dismissal, diagnostics preference and mobile appearance', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  contexts.push(context);
+  const page = await context.newPage();
+  await page.goto('/');
+  const body = page.getByRole('textbox', { name: 'Page body', exact: true });
+  await expect(body).toBeVisible();
+  await expect(page.getByTestId('save-status')).toHaveCount(0);
+  await expect(page.getByTestId('connection-status')).toHaveCount(0);
+  const trigger = page.getByRole('button', { name: 'Note menu', exact: true });
+  await trigger.focus();
+  await page.keyboard.press('Enter');
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Download recovery file', exact: true })).toBeFocused();
+  await page.getByRole('checkbox', { name: 'Show sync details', exact: true }).check();
+  await expectServerSaved(page);
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await page.reload();
+  await expectServerSaved(page);
+  const text = ` menu-${randomUUID().slice(0, 8)}`;
+  await appendToBody(page, text);
+  await expectServerSaved(page);
+  await openHeaderMenu(page);
+  await page.getByRole('checkbox', { name: 'Show sync details', exact: true }).uncheck();
+  await body.click();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await expect(body).toBeFocused();
+  await expect(page.getByTestId('save-status')).toHaveCount(0);
+  await page.screenshot({ path: 'test-results/fixture/header-light-desktop.png', fullPage: true });
+  await clickHeaderAction(page, 'Switch to dark mode');
+  await expect(trigger).toBeFocused();
+  await body.focus();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expectDocumentExcludes(body, text);
+  await page.setViewportSize({ width: 320, height: 700 });
+  await openHeaderMenu(page);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const bounds = await page.getByRole('region', { name: 'Note menu', exact: true }).boundingBox();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
+  await page.screenshot({ path: 'test-results/fixture/header-dark-mobile-menu.png', fullPage: true });
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await expect(body).toBeVisible();
+  await expect(page.getByTestId('save-status')).toHaveCount(0);
+  await context.setOffline(true);
+  await expect(page.locator('.offline-notice')).toContainText('Offline.');
+  await expect(page.getByTestId('save-status')).toHaveCount(0);
 });
 
 test('two independent browser contexts edit concurrently and reload committed content', async ({ browser }) => {
@@ -76,7 +130,7 @@ test('theme follows the system until chosen, persists after reload, and preserve
   const text = ` theme-${randomUUID().slice(0, 8)}`;
   await appendToBody(page, text);
   await expectServerSaved(page);
-  await page.getByRole('button', { name: 'Switch to light mode', exact: true }).click();
+  await clickHeaderAction(page, 'Switch to light mode');
   await expect(html).toHaveAttribute('data-theme', 'light');
   const body = page.getByRole('textbox', { name: 'Page body', exact: true });
   await expectDocumentContains(body, text);
@@ -97,11 +151,11 @@ test('unavailable theme preference storage does not prevent editing or switching
     const getItem = Storage.prototype.getItem;
     const setItem = Storage.prototype.setItem;
     Storage.prototype.getItem = function(key) {
-      if (key === 'kikit-theme') throw new DOMException('Storage unavailable', 'SecurityError');
+      if (key === 'kikit-theme' || key === 'kikit-sync-details') throw new DOMException('Storage unavailable', 'SecurityError');
       return getItem.call(this, key);
     };
     Storage.prototype.setItem = function(key, value) {
-      if (key === 'kikit-theme') throw new DOMException('Storage unavailable', 'SecurityError');
+      if (key === 'kikit-theme' || key === 'kikit-sync-details') throw new DOMException('Storage unavailable', 'SecurityError');
       setItem.call(this, key, value);
     };
   });
@@ -109,7 +163,7 @@ test('unavailable theme preference storage does not prevent editing or switching
   await page.goto('/');
   await expectServerSaved(page);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await page.getByRole('button', { name: 'Switch to light mode', exact: true }).click();
+  await clickHeaderAction(page, 'Switch to light mode');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   const text = ` storage-denied-${randomUUID().slice(0, 8)}`;
   await appendToBody(page, text);
@@ -126,7 +180,7 @@ test('recovery download retains offline batch identities after export failure an
   await expect(page.getByTestId('local-status')).toHaveText('Saved on this device');
   const downloadRecovery = async () => {
     const downloading = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Download recovery file', exact: true }).click();
+    await clickHeaderAction(page, 'Download recovery file');
     const download = await downloading;
     expect(download.suggestedFilename()).toMatch(/^kikit-recovery-\d{4}-\d{2}-\d{2}\.json$/);
     return JSON.parse(await readFile((await download.path())!, 'utf8'));
@@ -145,7 +199,7 @@ test('recovery download retains offline batch identities after export failure an
     recovered.destroy();
   }
   await page.evaluate(() => { URL.createObjectURL = () => { throw new Error('Simulated download failure'); }; });
-  await page.getByRole('button', { name: 'Download recovery file', exact: true }).click();
+  await clickHeaderAction(page, 'Download recovery file');
   await expect(page.getByRole('alert')).toContainText('The recovery file could not be created');
   await expectDocumentContains(page.getByRole('textbox', { name: 'Page body', exact: true }), text);
   await page.reload();
@@ -625,7 +679,7 @@ test('flat task lists support shortcuts, keyboard checks, split/merge, conversio
   await expectServerSaved(page);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.screenshot({ path: 'test-results/fixture/task-lists-light-desktop.png', fullPage: true });
-  await page.getByRole('button', { name: 'Switch to dark mode', exact: true }).click();
+  await clickHeaderAction(page, 'Switch to dark mode');
   await page.screenshot({ path: 'test-results/fixture/task-lists-dark-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 320, height: 760 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -635,9 +689,12 @@ test('flat task lists support shortcuts, keyboard checks, split/merge, conversio
 test('a lost checkbox acknowledgement retries one durable batch and preserves checked state and identity', async ({ browser, request }) => {
   const { page } = await openPage(browser);
   const body = page.getByRole('textbox', { name: 'Page body', exact: true });
-  await body.fill('Durable checkbox');
   await body.focus();
+  await body.press('ControlOrMeta+a');
+  await body.press('Backspace');
+  await page.keyboard.insertText('Durable checkbox');
   await page.getByRole('button', { name: 'Paragraph', exact: true }).click();
+  await expectDocumentText(body, 'Durable checkbox');
   await page.getByRole('button', { name: 'To-do list', exact: true }).click();
   const item = body.locator('li[data-type="taskItem"]').first();
   await expect(item.getByRole('checkbox')).not.toBeChecked();

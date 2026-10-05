@@ -343,3 +343,26 @@ No Railway service was provisioned or modified, no production migration/deployme
 ### Deployment readability follow-up · 2026-10-05
 
 Separated the command entry point, local configuration/Git archive/lock lifetime, Railway CLI/HTTP operations, and deployment sequencing into focused modules under `scripts/deployment`. The release workflow reads as preflight, stop, migrate, deploy and verify health. Existing failure/status guards and command arguments remain in place; cleanup now uses separate `finally` blocks for the snapshot and local lock. The fake-CLI test copies the modules into its isolated repository. Fresh `pnpm typecheck`, all 15 focused deployment checks and `git diff --check` passed. The full test/build results above predate this refactor; no production or database/browser/restore checks were run for it.
+
+## 2026-10-05: MAC-147 note header cleanup, local verification
+
+Implemented in the isolated `dev/mac-147-note-header` worktree based on main `d9de585`. The header has explicit **All notes** navigation and one native popover for sharing, binary recovery download, appearance and sign-out. Routine save/connection labels are hidden until **Show sync details** is enabled; the preference is remembered independently of the note journal. Offline, save-failure and access-loss recovery remain visible. The existing uncommitted account-panel CSS in the original working tree is excluded.
+
+Fresh local checks used Node 24, pnpm 12.5.1, Playwright 1.63.0/Chromium and the existing loopback PostgreSQL 17.9 test service. Browser suites ran sequentially against isolated `kikit_e2e`; authenticated scenarios used real Better Auth sessions, production assets and captured synthetic email delivery.
+
+| Check | Result |
+| --- | --- |
+| `pnpm typecheck` | Passed |
+| `pnpm test` | 121 passed; 38 PostgreSQL integration checks skipped |
+| `pnpm build` | Passed; existing large-chunk advisory remains |
+| `pnpm test:e2e` | All 23 editor/failure/recovery scenarios passed |
+| `pnpm test:e2e:accounts` | All nine account/sharing/presence scenarios passed |
+| `git diff --check` | Passed |
+
+Coverage includes a quiet default header, keyboard opening/Tab/Escape, outside dismissal, diagnostic persistence and unavailable preference storage, light/dark switching without losing editor undo, offline notices with diagnostics off, guarded navigation/sign-out, recovery downloads and sharing permissions. Closing sharing or cancelling sign-out restores focus to the visible menu trigger. The dialog lifecycle now closes/restores focus during layout cleanup, before React removes its DOM. Save assertions explicitly enable UI diagnostics and continue to require durable server confirmation; connection alone is never treated as a save.
+
+An initial browser run exposed a menu-helper mount/toggle race and the dialog focus loss; both were corrected before the full passing runs above. The checkbox lost-acknowledgement scenario now clears inherited task content using native select-all/delete before typing its setup, and asserts the resulting document text. Its checked-state, batch-count, stable-identity and reload assertions remain intact. The fixture suite still reports upstream initial task-list selection warnings and expected disconnect proxy errors during failure scenarios.
+
+Inspected synthetic light desktop and 320px dark note-menu screenshots under ignored `.artifacts/`, plus the fixture menu screenshots in `test-results/fixture/`. The return control, menu labels and focus behavior remain usable without horizontal overflow. This is Chromium verification, not a full screen-reader, native mobile keyboard or cross-browser audit.
+
+No backend, dependency, document/protocol/database version or durability contract changed. Standalone PostgreSQL integration and backup/restore checks were not rerun for this UI slice; the browser suites exercised the actual backend/database. This checkpoint is worktree implementation evidence, not a merge or hosted deployment.

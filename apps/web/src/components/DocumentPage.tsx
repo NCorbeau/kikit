@@ -3,33 +3,49 @@ import type { DocumentSession, SessionSnapshot } from '../session';
 import { useRecoveryDownload } from '../session/useRecoveryDownload';
 import { PageEditor } from '../editor/PageEditor';
 import { AppHeader } from './AppHeader';
-import { DownloadIcon } from './Icons';
 import { SaveStatus, hasSaveFailure } from './SaveStatus';
 import { Participants } from './Participants';
+import { useSyncDetails } from './useSyncDetails';
 
-export function DocumentPage({ session, snapshot, accountActions, onHome }: {
+export function DocumentPage({ session, snapshot, shareAction, onSignOut, actionsDisabled, onHome }: {
   session: DocumentSession;
   snapshot: SessionSnapshot;
-  accountActions?: ReactNode;
+  shareAction?: ReactNode;
+  onSignOut?(): void;
+  actionsDisabled?: boolean;
   onHome?(): void;
 }) {
   const recovery = useRecoveryDownload(session);
   const failed = hasSaveFailure(snapshot);
   const retry = () => session.retry();
+  const syncDetails = useSyncDetails();
 
   return (
     <div className="app-shell">
       <a href="#writing" className="skip-link" onClick={event => {
         event.preventDefault(); document.getElementById('writing')?.focus();
       }}>Skip to writing</a>
-      <AppHeader onHome={onHome}>
-        {accountActions}
-        <SaveStatus snapshot={snapshot} onRetry={retry} />
+      <AppHeader
+        onHome={onHome} menuLabel="Note menu"
+        navigation={onHome && (
+          <button type="button" className="notes-navigation" disabled={actionsDisabled} onClick={onHome}>
+            <span aria-hidden="true">←</span> All notes
+          </button>
+        )}
+        status={syncDetails.visible && <SaveStatus snapshot={snapshot} onRetry={retry} />}
+        menuExtras={
+          <label className="menu-checkbox">
+            <input type="checkbox" checked={syncDetails.visible} onChange={event => syncDetails.changeVisible(event.target.checked)} />
+            Show sync details
+          </label>
+        }
+        menuFooter={onSignOut && <button type="button" disabled={actionsDisabled} onClick={onSignOut}>Sign out</button>}
+      >
+        {shareAction}
         <button
-          type="button" className="export-button" onClick={recovery.download}
-          disabled={!snapshot.ready} aria-label="Download recovery file" title="Download recovery file"
+          type="button" onClick={recovery.download} disabled={!snapshot.ready}
         >
-          <DownloadIcon />
+          Download recovery file
         </button>
       </AppHeader>
 

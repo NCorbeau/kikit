@@ -9,10 +9,11 @@ export function ThemeToggle() {
 
   return (
     <button
-      type="button" className="icon-button theme-button" aria-label={label} title={label}
+      type="button" className="theme-button" aria-label={label}
       onClick={() => setTheme(next)}
     >
       {theme === 'light' ? <MoonIcon /> : <SunIcon />}
+      <span>{label}</span>
     </button>
   );
 }

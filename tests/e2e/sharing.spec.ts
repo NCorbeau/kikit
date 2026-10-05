@@ -1,3 +1,4 @@
+import { clickHeaderAction, openHeaderMenu } from './header-actions';
 import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import jsQR from 'jsqr';
 import {
@@ -30,7 +31,7 @@ const sharingDialog = (page: Page) => page.getByRole('dialog', { name: 'Share no
 const invitePath = (token: string) => `/#/join/${token}`;
 
 async function openSharing(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  await clickHeaderAction(page, 'Share');
   await expect(sharingDialog(page)).toBeVisible();
 }
 
@@ -61,6 +62,7 @@ async function createInvitation(page: Page): Promise<{ token: string; url: strin
 async function closeSharing(page: Page): Promise<void> {
   await sharingDialog(page).getByRole('button', { name: 'Close sharing controls', exact: true }).click();
   await expect(sharingDialog(page)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Note menu', exact: true })).toBeFocused();
 }
 
 async function joinThroughUi(page: Page, token: string): Promise<void> {
@@ -138,7 +140,9 @@ test('invitation QR/link, secret-free login continuation, explicit join, and two
   await serverSaved(memberPage);
   expect(joinRequests).toBe(1);
   expect((await memberPage.request.get(`/api/pages/${privateId}/session`)).status()).toBe(403);
+  await openHeaderMenu(memberPage);
   await expect(memberPage.getByRole('button', { name: 'Share', exact: true })).toHaveCount(0);
+  await memberPage.keyboard.press('Escape');
 
   const duplicate = await memberPage.request.post('/api/invitations/join', { headers: { origin: accountOrigin }, data: { token } });
   expect(duplicate.status()).toBe(200);
@@ -310,7 +314,7 @@ test('active and offline member removal preserves recovery and stable pending id
   await device.context.setOffline(true);
   await appendBody(device.page, ' Offline draft retained after removal.');
   await expect(device.page.getByTestId('save-status')).toHaveText('Saved on this device');
-  await device.page.getByRole('button', { name: 'Notes', exact: true }).click();
+  await device.page.getByRole('button', { name: 'All notes', exact: true }).click();
   const leave = device.page.getByRole('dialog', { name: 'Return to your notes?', exact: true });
   await expect(leave).toBeVisible();
   await device.page.keyboard.press('Escape');

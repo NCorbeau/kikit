@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { containDialogFocus } from '../components/dialog-focus';
 import { ShareConfirmation } from './ShareConfirmation';
@@ -33,10 +33,14 @@ function ShareDialog({ pageId, accountId, onClose }: {
   onClose(): void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = dialog.current;
+    const previousFocus = document.activeElement;
     node?.showModal();
-    return () => { node?.close(); };
+    return () => {
+      node?.close();
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    };
   }, []);
 
   const {
