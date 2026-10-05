@@ -1,14 +1,3 @@
-export function DownloadIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path
-        d="M10 2.5v9m-3-3 3 3 3-3M4 12.5v3A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-3"
-        stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 export function UndoIcon({ redo = false }: { redo?: boolean }) {
   return (
     <svg

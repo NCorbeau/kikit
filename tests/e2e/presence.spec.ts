@@ -1,3 +1,4 @@
+import { clickHeaderAction } from './header-actions';
 import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import {
   AccountBrowserHarness, createNote, pageBody, serverSaved, type BrowserAccount,
@@ -31,7 +32,7 @@ const caret = (page: Page, accountId: string) => page.locator(`.collaboration-ca
 
 async function createInvitationAndInspectDialog(page: Page): Promise<string> {
   await page.emulateMedia({ colorScheme: 'light' });
-  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  await clickHeaderAction(page, 'Share');
   await expect(dialog(page)).toBeVisible();
   await dialog(page).getByRole('button', { name: 'Create invitation', exact: true }).click();
   const link = dialog(page).getByRole('textbox', { name: 'Invitation link', exact: true });
@@ -68,7 +69,7 @@ async function createInvitationAndInspectDialog(page: Page): Promise<string> {
 }
 
 async function removeMember(owner: Page, member: BrowserAccount): Promise<void> {
-  await owner.getByRole('button', { name: 'Share', exact: true }).click();
+  await clickHeaderAction(owner, 'Share');
   await dialog(owner).getByRole('button', { name: `Remove ${member.email}`, exact: true }).click();
   await expect(dialog(owner).getByRole('heading', { name: 'Remove member?' })).toBeVisible();
   await dialog(owner).getByRole('button', { name: 'Remove member', exact: true }).click();

@@ -356,3 +356,30 @@ Final checks passed: the exact app deployment is SUCCESS with a RUNNING instance
 The migration service is retained idle with no domain, volume, healthcheck, automatic source trigger or restart. Its privileged migration-role credential was refreshed with explicit user approval and kept out of the app. Temporary SSH access was revoked, its local private key removed, and the terminated poller’s stale lock cleared. No plan or workspace limit changed.
 
 The follow-up correction reads exact deployment stop/instance states through Railway’s GraphQL API, requires the final completion marker before starting the app, treats stopped successful jobs as idle on retries, rejects stopped app deployments, and emits the marker only after migration connection cleanup. Fresh typecheck and all 20 focused checks passed, including active/startup-only jobs, missing markers, empty/non-exited instance sets and stopped apps. The corrected read-only adapter was exercised against the actual completed job and running app. Full automated stop/migrate/start repetition with the correction remains pending; no additional outage was introduced to repeat it.
+
+## 2026-10-05: MAC-147 note header cleanup, local verification
+
+Implemented in the isolated `dev/mac-147-note-header` worktree based on main `d9de585`. The header has explicit **All notes** navigation and one native popover for sharing, binary recovery download, appearance and sign-out. Routine save/connection labels are hidden until **Show sync details** is enabled; the preference is remembered independently of the note journal. Offline, save-failure and access-loss recovery remain visible. The existing uncommitted account-panel CSS in the original working tree is excluded.
+
+Fresh local checks used Node 24, pnpm 12.5.1, Playwright 1.63.0/Chromium and the existing loopback PostgreSQL 17.9 test service. Browser suites ran sequentially against isolated `kikit_e2e`; authenticated scenarios used real Better Auth sessions, production assets and captured synthetic email delivery.
+
+| Check | Result |
+| --- | --- |
+| `pnpm typecheck` | Passed |
+| `pnpm test` | 121 passed; 38 PostgreSQL integration checks skipped |
+| `pnpm build` | Passed; existing large-chunk advisory remains |
+| `pnpm test:e2e` | All 23 editor/failure/recovery scenarios passed |
+| `pnpm test:e2e:accounts` | All nine account/sharing/presence scenarios passed |
+| `git diff --check` | Passed |
+
+Coverage includes a quiet default header, keyboard opening/Tab/Escape, outside dismissal, diagnostic persistence and unavailable preference storage, light/dark switching without losing editor undo, offline notices with diagnostics off, guarded navigation/sign-out, recovery downloads and sharing permissions. Closing sharing or cancelling sign-out restores focus to the visible menu trigger. The dialog lifecycle now closes/restores focus during layout cleanup, before React removes its DOM. Save assertions explicitly enable UI diagnostics and continue to require durable server confirmation; connection alone is never treated as a save.
+
+An initial browser run exposed a menu-helper mount/toggle race and the dialog focus loss; both were corrected before the full passing runs above. The checkbox lost-acknowledgement scenario now clears inherited task content using native select-all/delete before typing its setup, and asserts the resulting document text. Its checked-state, batch-count, stable-identity and reload assertions remain intact. The fixture suite still reports upstream initial task-list selection warnings and expected disconnect proxy errors during failure scenarios.
+
+Inspected synthetic light desktop and 320px dark note-menu screenshots under ignored `.artifacts/`, plus the fixture menu screenshots in `test-results/fixture/`. The return control, menu labels and focus behavior remain usable without horizontal overflow. This is Chromium verification, not a full screen-reader, native mobile keyboard or cross-browser audit.
+
+No backend, dependency, document/protocol/database version or durability contract changed. Standalone PostgreSQL integration and backup/restore checks were not rerun for this UI slice; the browser suites exercised the actual backend/database. This checkpoint is worktree implementation evidence, not a merge or hosted deployment.
+
+### PR conflict resolution · 2026-10-05
+
+Merged main `9484244` into the header branch. The only conflict was between appended sections in this verification record; both deployment and header evidence are retained. Fresh typecheck, all 126 fast tests (38 PostgreSQL integration checks skipped), build and `git diff --check` passed. The web source and browser tests are unchanged from `bb37377`, so the 23 fixture and nine authenticated browser results above were not rerun for this documentation resolution. No hosted deployment or additional database/browser/restore check was performed.

@@ -1,3 +1,4 @@
+import { showSyncDetails } from './header-actions';
 import { expect, type Browser, type BrowserContext, type BrowserContextOptions, type Page } from '@playwright/test';
 import pg from 'pg';
 import WebSocket from 'ws';
@@ -28,6 +29,7 @@ export async function openPage(browser: Browser, options: BrowserContextOptions 
 }
 
 export async function expectServerSaved(page: Page) {
+  await showSyncDetails(page);
   await expect(page.getByTestId('save-status')).toHaveText('Saved to server');
 }
 

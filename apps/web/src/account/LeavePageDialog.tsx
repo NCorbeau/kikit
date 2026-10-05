@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { containDialogFocus } from '../components/dialog-focus';
 import type { WorkspaceExitIntent } from './useWorkspaceExit';
 
@@ -20,10 +20,14 @@ export function LeavePageDialog({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const { title, action } = exitCopy(intent);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const dialog = dialogRef.current;
+    const previousFocus = document.activeElement;
     dialog?.showModal();
-    return () => dialog?.close();
+    return () => {
+      dialog?.close();
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    };
   }, [intent]);
 
   return (
@@ -45,7 +49,7 @@ export function LeavePageDialog({
       )}
       {error && <p role="alert">{error}</p>}
       <div className="notice-actions">
-        <button type="button" autoFocus disabled={busy} onClick={onCancel}>Continue editing</button>
+        <button type="button" disabled={busy} onClick={onCancel}>Continue editing</button>
         <button type="button" onClick={onDownload}>Download recovery</button>
         <button type="button" className="primary-button" disabled={!canContinue} onClick={onContinue}>
           {action}

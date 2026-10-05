@@ -57,7 +57,7 @@ The [account contract](docs/accounts-contract.md) describes cookies, authorizati
 - A collaborative page title, paragraphs, headings at levels 1–3, and flat checkbox lists.
 - Email magic-link accounts, a private note list, and idempotent creation of empty notes.
 - Normal typing, selection, Enter/Backspace, paste, local collaborative undo/redo, heading shortcuts, labelled controls, visible keyboard focus, and a responsive writing surface.
-- A compact writing UI with light/dark themes. Appearance follows the system until you choose a mode using the header toggle; your choice is remembered locally.
+- A compact writing UI with **All notes** navigation and a note menu for Share, recovery download, appearance and sign-out. Appearance follows the system until you choose a mode in the menu; your choice is remembered locally.
 - Stable block IDs retained for existing blocks and regenerated for split/pasted blocks.
 - One Y.Doc per page, bound directly to Tiptap. React does not own another editable copy.
 - Atomic IndexedDB storage of each local binary update and its stable outbound batch ID before transmission.
@@ -65,7 +65,7 @@ The [account contract](docs/accounts-contract.md) describes cookies, authorizati
 - Independent browser sessions synchronize, reopen cached notes offline, and resend locally saved pending edits after reload or reconnect.
 - Distinct device-save, server-save, connection, offline, and failure states; retry and binary recovery export.
 
-The status menu explains local and server durability separately. **Saved on this device** means the IndexedDB transaction completed. **Saved to server** means the current session has synchronized and every pending batch has a durable receipt. Being connected alone does not establish that guarantee. A local save failure keeps unsaved work in memory and warns before leaving: keep the tab open, retry, or export recovery.
+Routine save/connection labels are hidden by default. Enable **Show sync details** in the note menu to inspect device and server durability separately; this optional preference is remembered locally. Offline and save-failure notices, retry and recovery remain visible without diagnostics. **Saved on this device** means the IndexedDB transaction completed. **Saved to server** means the current session has synchronized and every pending batch has a durable receipt. Being connected alone does not establish that guarantee. A local save failure keeps unsaved work in memory and warns before leaving: keep the tab open, retry, or export recovery.
 
 The service worker caches the app shell after an initial connected load, enabling an actual offline reload in both account and fixture modes. API responses and note contents are never put in that shell cache. Notes live in IndexedDB, namespaced by account and page. The last account and note-list metadata provide an offline hint, not server authorization. Signing out removes that hint and retains each account's journal. Browser cache eviction or clearing site data can remove locally saved work. If source/dependency changes leave a stale shell, reconnect and reload; unregister only the shell worker/cache when troubleshooting, and preserve IndexedDB.
 

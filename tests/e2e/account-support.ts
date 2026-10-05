@@ -1,3 +1,4 @@
+import { openHeaderMenu, showSyncDetails } from './header-actions';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { expect, type BrowserContext, type Page } from '@playwright/test';
@@ -107,7 +108,10 @@ export class AccountBrowserHarness {
 }
 
 export const pageBody = (page: Page) => page.getByRole('textbox', { name: 'Page body', exact: true });
-export const serverSaved = (page: Page) => expect(page.getByTestId('save-status')).toHaveText('Saved to server');
+export async function serverSaved(page: Page) {
+  await showSyncDetails(page);
+  await expect(page.getByTestId('save-status')).toHaveText('Saved to server');
+}
 
 export async function appendBody(page: Page, value: string): Promise<void> {
   await pageBody(page).click();
@@ -127,6 +131,7 @@ export async function createNote(page: Page, title: string, content: string): Pr
 }
 
 export async function downloadRecovery(page: Page, buttonName = 'Download recovery'): Promise<RecoveryFile> {
+  if (buttonName === 'Download recovery file') await openHeaderMenu(page);
   const downloaded = page.waitForEvent('download');
   await page.getByRole('button', { name: buttonName, exact: true }).click();
   const file = await downloaded;

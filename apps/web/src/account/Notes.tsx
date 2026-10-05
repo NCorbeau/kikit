@@ -34,9 +34,9 @@ export function Notes({ workspace, onOpen, onChanged, onSignedOut }: {
       onSignedOut();
     } catch { setError('Connect and try again to sign out.'); setBusy(false); }
   }
-  return <div className="app-shell"><AppHeader>
+  return <div className="app-shell"><AppHeader menuFooter={
     <button type="button" disabled={busy || !online} onClick={() => { void signOut(); }}>Sign out</button>
-  </AppHeader>
+  }>{null}</AppHeader>
     <main className="account-panel notes-panel">
       <div className="notes-heading"><h1>Your notes</h1><button type="button" className="primary-button" disabled={busy || !online} onClick={() => { void create(); }}>{busy ? 'Please wait…' : 'New note'}</button></div>
       <p className="account-email">{workspace.account?.email}</p>

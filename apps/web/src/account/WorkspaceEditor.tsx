@@ -61,15 +61,9 @@ export function WorkspaceEditor(props: WorkspaceEditorProps) {
         session={session}
         snapshot={snapshot}
         onHome={openNotes}
-        accountActions={
-          <>
-            <button type="button" disabled={exit.busy} onClick={openNotes}>Notes</button>
-            {isOwner && (
-              <ShareControls pageId={pageId} accountId={account.accountId} disabled={sharingDisabled} />
-            )}
-            <button type="button" disabled={exit.busy} onClick={signOut}>Sign out</button>
-          </>
-        }
+        actionsDisabled={exit.busy}
+        onSignOut={signOut}
+        shareAction={isOwner && <ShareControls pageId={pageId} accountId={account.accountId} disabled={sharingDisabled} />}
       />
       {exit.intent && exit.confirmationRequired && (
         <LeavePageDialog

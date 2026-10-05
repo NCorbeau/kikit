@@ -1,3 +1,4 @@
+import { clickHeaderAction, openHeaderMenu, showSyncDetails } from './header-actions';
 import { randomUUID } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
 import pg from 'pg';
@@ -52,7 +53,10 @@ async function login(page: Page, email: string) {
   await expect(page.getByRole('heading', { name: 'Your notes' })).toBeVisible();
 }
 const body = (page: Page) => page.getByRole('textbox', { name: 'Page body', exact: true });
-const saved = (page: Page) => expect(page.getByTestId('save-status')).toHaveText('Saved to server');
+async function saved(page: Page) {
+  await showSyncDetails(page);
+  await expect(page.getByTestId('save-status')).toHaveText('Saved to server');
+}
 
 test('production build: magic links, isolated accounts, cross-device sync, offline reload, and safe sign-out', async ({ browser }) => {
   const a = `${randomUUID()}@example.test`; const b = `${randomUUID()}@example.test`; emails.push(a, b);
@@ -64,8 +68,21 @@ test('production build: magic links, isolated accounts, cross-device sync, offli
     await login(pageA, a);
     await pageA.getByRole('button', { name: 'New note', exact: true }).click();
     await expect(body(pageA)).toBeVisible();
+    await expect(pageA.getByRole('button', { name: 'All notes', exact: true })).toBeVisible();
+    await expect(pageA.getByTestId('save-status')).toHaveCount(0);
     await pageA.getByRole('textbox', { name: 'Page title', exact: true }).fill('Private browser note');
-    await body(pageA).fill('First device.'); await saved(pageA);
+    await body(pageA).fill('First device.');
+    await pageA.screenshot({ path: '.artifacts/header-light-desktop.png', fullPage: true, animations: 'disabled' });
+    await openHeaderMenu(pageA);
+    await expect(pageA.getByRole('button', { name: 'Share', exact: true })).toBeEnabled();
+    await pageA.setViewportSize({ width: 320, height: 700 });
+    await pageA.emulateMedia({ colorScheme: 'dark' });
+    await expect.poll(() => pageA.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await pageA.screenshot({ path: '.artifacts/header-dark-mobile-menu.png', fullPage: true, animations: 'disabled' });
+    await pageA.keyboard.press('Escape');
+    await pageA.setViewportSize({ width: 1280, height: 800 });
+    await pageA.emulateMedia({ colorScheme: 'light' });
+    await saved(pageA);
     const pageId = new URL(pageA.url()).hash.split('/').at(-1)!;
     // Saved notes return directly to the list through either header control or
     // browser navigation, without mounting a confirmation dialog.
@@ -78,7 +95,7 @@ test('production build: magic links, isolated accounts, cross-device sync, offli
       };
     });
     for (const control of ['notes', 'home', 'browser'] as const) {
-      if (control === 'notes') await pageA.getByRole('button', { name: 'Notes', exact: true }).click();
+      if (control === 'notes') await pageA.getByRole('button', { name: 'All notes', exact: true }).click();
       else if (control === 'home') await pageA.getByRole('link', { name: 'Kikit home', exact: true }).click();
       else await pageA.evaluate(() => { location.hash = ''; });
       await expect(pageA.getByRole('heading', { name: 'Your notes' })).toBeVisible();
@@ -88,6 +105,11 @@ test('production build: magic links, isolated accounts, cross-device sync, offli
       await expectDocumentContains(body(pageA), 'First device.');
       await saved(pageA);
     }
+    await clickHeaderAction(pageA, 'Sign out');
+    await expect(pageA.getByRole('dialog')).toContainText('Sign out');
+    await pageA.keyboard.press('Escape');
+    await expect(pageA.getByRole('button', { name: 'Note menu', exact: true })).toBeFocused();
+    await saved(pageA);
     await login(pageB, b);
     await expect(pageB.getByRole('button', { name: 'Private browser note' })).toHaveCount(0);
     const denied = await pageB.request.get(`/api/pages/${pageId}/session`);
@@ -110,7 +132,7 @@ test('production build: magic links, isolated accounts, cross-device sync, offli
     await body(pageA).press('End'); await pageA.keyboard.insertText(' Pending at sign-out.');
     await expect(pageA.getByTestId('save-status')).toHaveText('Saved on this device');
     // Navigation explicitly preserves pending account-scoped records.
-    await pageA.getByRole('button', { name: 'Notes', exact: true }).click();
+    await pageA.getByRole('button', { name: 'All notes', exact: true }).click();
     await expect(pageA.getByRole('dialog')).toContainText('Pending changes will stay');
     await pageA.getByRole('button', { name: 'Continue editing', exact: true }).focus();
     await pageA.keyboard.press('Shift+Tab');
@@ -120,11 +142,11 @@ test('production build: magic links, isolated accounts, cross-device sync, offli
     await pageA.getByRole('button', { name: 'Open notes', exact: true }).click();
     await expect(pageA.getByRole('heading', { name: 'Your notes' })).toBeVisible();
     await contextA.setOffline(false);
-    await pageA.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await clickHeaderAction(pageA, 'Sign out');
     await expect(pageA.getByRole('heading', { name: 'Sign in to Kikit' })).toBeVisible();
     await login(pageA, b);
     await expect(pageA.getByRole('button', { name: 'Private browser note' })).toHaveCount(0);
-    await pageA.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await clickHeaderAction(pageA, 'Sign out');
     await login(pageA, a);
     await pageA.getByRole('button', { name: 'Private browser note' }).click();
     await expectDocumentContains(body(pageA), 'Pending at sign-out.'); await saved(pageA);
@@ -168,7 +190,14 @@ test('local save failure blocks leaving and session expiry preserves an exportab
     });
     await body(page).fill('Draft that only exists in memory.');
     await expect(page.getByTestId('save-status')).toHaveText('Device save failed');
-    await page.getByRole('button', { name: 'Notes', exact: true }).click();
+    await clickHeaderAction(page, 'Switch to dark mode');
+    await clickHeaderAction(page, 'Switch to light mode');
+    await page.getByRole('button', { name: 'Note menu', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Show sync details', exact: true }).uncheck();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('save-status')).toHaveCount(0);
+    await expect(page.getByRole('alert')).toContainText('Unable to save changes');
+    await page.getByRole('button', { name: 'All notes', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Open notes', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Continue editing', exact: true })).toBeEnabled();
     await page.keyboard.press('Escape');
