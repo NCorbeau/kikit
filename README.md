@@ -81,11 +81,15 @@ Authorized collaborators appear above the document with colored cursors and sele
 
 Choose **To-do list** in the formatting controls, or type `[ ] ` at the start of a paragraph. `[x] ` creates a completed item. Enter adds an unchecked item; Enter on an empty item returns to ordinary text. **Text** or a heading control converts the selected items back to ordinary blocks. Checkboxes can be focused with Tab and toggled with Space. Completed items stay in place. Lists support the same local persistence, offline recovery, synchronization and collaborative undo as text.
 
-The task-list slice adds document schema 2 and database schema 4 while retaining wire protocol 2. Existing notes and pending browser journals are upgraded without replacing binary history or batch identities. The 2026-10-05 Railway rollout applied these versions; hosted checklist interaction/sync remains unverified. This source now requires database schema 6 for note deletion and document compaction; it is not deployed. See [the task-list contract](docs/task-lists-contract.md), [deletion contract](docs/deletion-contract.md) and [snapshot contract](docs/snapshot-contract.md).
+The task-list slice adds document schema 2 and database schema 4 while retaining wire protocol 2. Existing notes and pending browser journals are upgraded without replacing binary history or batch identities. The 2026-10-05 Railway rollout applied these versions; hosted checklist interaction/sync remains unverified. This source now requires database schema 7 for note deletion, document compaction and recovery-copy initialization; it is not deployed. See [the task-list contract](docs/task-lists-contract.md), [deletion contract](docs/deletion-contract.md), [snapshot contract](docs/snapshot-contract.md) and [recovery contract](docs/recovery-contract.md).
 
 ## Deleting notes
 
 Owners can choose **Delete note** in the note menu and confirm permanent deletion for everyone. There is no Trash or undo. Shared access and invitations end; delayed create retries cannot recreate the note. Local drafts remain recoverable. If device saving fails, download recovery before confirming deletion. See [the deletion and recovery policy](docs/data-policy.md).
+
+## Recovery files
+
+Choose **Import recovery file** in the app or note menu. With the exporting account signed in, merge into the open original note while still authorized, or recover a new private copy. Existing edits, pending identities and the original file are retained; failed imports offer an actionable error. Large missing histories may require a private copy under the existing wire limits. See [the recovery contract](docs/recovery-contract.md).
 
 ## Development identity boundary
 
@@ -134,6 +138,8 @@ Fixture page access is checked separately through PostgreSQL grants on handshake
 
 Reconnect uses a full committed Yjs state handshake. It does not clear pending batches. A reused batch identity with different bytes is rejected. If concurrent deletions remove every body block, the server commits one empty paragraph with the edit and returns that same repair on retries. Any uncertain database commit or room-application failure invalidates the room; connected clients reload committed state and resolve pending outcomes through receipts. No separate REST content-save path exists.
 
+See [the architecture diagrams](docs/architecture.md) for trust boundaries, the two durability boundaries and offline recovery.
+
 See [the concrete protocol and persistence contract](docs/milestone-contract.md) and [verification evidence](docs/verification.md). [AGENTS.md](AGENTS.md) records project-wide invariants and scope.
 
 ## Verification
@@ -164,7 +170,7 @@ The [GitHub Actions workflow](.github/workflows/quality.yml) runs code quality, 
 - Full-state handshakes and binary snapshots with a retained committed tail; covered update rows are pruned only after snapshot commit. Independent receipts preserve retries and original server repairs. Compaction runs after 100 updates or 1 MiB of additional tail. Updates are limited to 256 KiB and encoded documents/snapshots to 2 MiB. A history-heavy oversized snapshot leaves source updates intact and records a maintenance failure. These are guardrails, not measured capacity claims.
 - Queues admit at most 64 operations/8 MiB per page and 256 operations/32 MiB globally, including running work. At most 128 sockets; each socket has a 4 MiB outbound budget. Overload leaves uncommitted edits pending.
 - PostgreSQL applies 5-second statement, 2-second lock, and 15-second transaction limits. Queue ownership stays with an operation until completion/rollback. Shutdown stops admission, rejects queued work, and waits for active operations; a network blackhole can still delay shutdown. No deployment deadline or production availability target is claimed.
-- Binary recovery export has no import UI yet. Recovery import is required before v1; compaction and stylesheet organization are implemented locally. The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; scheduled backups and hosted restoration remain unimplemented release gates. No performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
+- Binary recovery export/import, compaction and stylesheet organization are implemented locally. See [recovery import](docs/recovery-contract.md), [local measurements](docs/performance.md) and [input/accessibility conditions](docs/accessibility.md). The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; scheduled backups and hosted restoration remain open. Capacity, physical mobile input, OS IME and screen-reader support are not established by the local Chromium checks.
 - The Docker image serves the production bundle. Hosted private-account and two-account sharing checks have dated evidence; natural session renewal/expiry remains unverified. The editor bundle produces Vite's large-chunk advisory.
 
 The [v1 release checklist](docs/v1-release.md) tracks the agreed remaining work, including hosted renewal/expiry, tested backups, recovery import and compaction. Permanent owner-only deletion is implemented locally and requires migration/deployment before hosted use. Hosted sharing is verified under the recorded Chromium conditions; broader failure/browser/accessibility evidence and performance remain separate gates. This does not establish complete v1 readiness.
