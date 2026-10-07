@@ -81,7 +81,7 @@ Authorized collaborators appear above the document with colored cursors and sele
 
 Choose **To-do list** in the formatting controls, or type `[ ] ` at the start of a paragraph. `[x] ` creates a completed item. Enter adds an unchecked item; Enter on an empty item returns to ordinary text. **Text** or a heading control converts the selected items back to ordinary blocks. Checkboxes can be focused with Tab and toggled with Space. Completed items stay in place. Lists support the same local persistence, offline recovery, synchronization and collaborative undo as text.
 
-The task-list slice adds document schema 2 and database schema 4 while retaining wire protocol 2. Existing notes and pending browser journals are upgraded without replacing binary history or batch identities. The 2026-10-05 Railway rollout applied these versions; hosted checklist interaction/sync remains unverified. This source now requires database schema 5 for note deletion; it is not deployed. See [the task-list contract](docs/task-lists-contract.md) and [deletion contract](docs/deletion-contract.md).
+The task-list slice adds document schema 2 and database schema 4 while retaining wire protocol 2. Existing notes and pending browser journals are upgraded without replacing binary history or batch identities. The 2026-10-05 Railway rollout applied these versions; hosted checklist interaction/sync remains unverified. This source now requires database schema 6 for note deletion and document compaction; it is not deployed. See [the task-list contract](docs/task-lists-contract.md), [deletion contract](docs/deletion-contract.md) and [snapshot contract](docs/snapshot-contract.md).
 
 ## Deleting notes
 
@@ -117,6 +117,7 @@ Fixture page access is checked separately through PostgreSQL grants on handshake
 | `apps/server/src/presence.ts` | Transient frame validation, authenticated identity, client-ID ownership, rate bounds and awareness lifetime |
 | `apps/server/src/queue.ts` | Bounded per-page sequencing and shutdown admission |
 | `apps/server/src/persistence.ts` | Page access locks, document loading, transactions and receipts |
+| `apps/server/src/document-storage.ts` and `document-snapshots.ts` | Consistent snapshot/tail hydration and committed snapshot-before-prune maintenance |
 | `apps/server/src/schema.ts` | Drizzle table definitions and binary column types |
 | `apps/server/migrations` | Reviewed SQL migration files and generated metadata |
 | `apps/server/src/migrations.ts` | Migration lock, history verification, and Drizzle runner |
@@ -159,10 +160,10 @@ The [GitHub Actions workflow](.github/workflows/quality.yml) runs code quality, 
 
 - One active account server, private notes and authenticated shared pages. PostgreSQL does not coordinate in-memory rooms across replicas. An ownership lock rejects a second account server; deployments require stopping and draining the old instance first.
 - Plain text paragraphs/headings and flat checkbox lists: no marks, nested lists, due dates, reminders, attachments, comments, drag reordering, or advanced blocks.
-- Full-state handshakes and retained binary update histories; no snapshot compaction/pruning. Updates are limited to 256 KiB and committed documents to 2 MiB. These are guardrails, not measured capacity claims.
+- Full-state handshakes and binary snapshots with a retained committed tail; covered update rows are pruned only after snapshot commit. Independent receipts preserve retries and original server repairs. Compaction runs after 100 updates or 1 MiB of additional tail. Updates are limited to 256 KiB and encoded documents/snapshots to 2 MiB. A history-heavy oversized snapshot leaves source updates intact and records a maintenance failure. These are guardrails, not measured capacity claims.
 - Queues admit at most 64 operations/8 MiB per page and 256 operations/32 MiB globally, including running work. At most 128 sockets; each socket has a 4 MiB outbound budget. Overload leaves uncommitted edits pending.
 - PostgreSQL applies 5-second statement, 2-second lock, and 15-second transaction limits. Queue ownership stays with an operation until completion/rollback. Shutdown stops admission, rejects queued work, and waits for active operations; a network blackhole can still delay shutdown. No deployment deadline or production availability target is claimed.
-- Binary recovery export has no import UI yet. Recovery import, document compaction and stylesheet refactoring are required before v1. The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; scheduled backups and hosted restoration remain unimplemented release gates. No performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
+- Binary recovery export has no import UI yet. Recovery import and stylesheet refactoring are required before v1; compaction is implemented locally. The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; scheduled backups and hosted restoration remain unimplemented release gates. No performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
 - The Docker image serves the production bundle. Hosted private-account and two-account sharing checks have dated evidence; natural session renewal/expiry remains unverified. The editor bundle produces Vite's large-chunk advisory.
 
 The [v1 release checklist](docs/v1-release.md) tracks the agreed remaining work, including hosted renewal/expiry, tested backups, recovery import and compaction. Permanent owner-only deletion is implemented locally and requires migration/deployment before hosted use. Hosted sharing is verified under the recorded Chromium conditions; broader failure/browser/accessibility evidence and performance remain separate gates. This does not establish complete v1 readiness.

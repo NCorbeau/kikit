@@ -10,6 +10,8 @@ Protocol, document schema, and database schema independently start at version 1.
 
 The [permanent deletion slice](deletion-contract.md), added on 2026-10-07, advances database schema to 5. Document schema 2 and wire protocol 2 are unchanged. A content-free deletion marker reserves the page identity; the note's durable content, receipts, invitations and grants are removed atomically.
 
+The [document snapshot slice](snapshot-contract.md), added on the same date, advances database schema to 6. Binary snapshots commit before covered updates are pruned; loading applies snapshot plus tail. Receipts retain independent original repair bytes and do not expire with the update tail. The original milestone's no-compaction behavior below is historical.
+
 ## Document
 
 One Y.Doc per page. `title` is a Y.XmlFragment containing exactly one paragraph, with plain text. `body` is a Y.XmlFragment containing paragraphs and headings (levels 1–3), with plain text and a stable `id` attribute per block. No marks or extra blocks. The server initializes both fragments exactly once in a transaction. Browsers never seed an empty page. The editor mounts only after a persisted cache or server state is hydrated. Tiptap Collaboration supplies CRDT-aware local undo; UniqueID handles local split/paste, filtering remote transactions.

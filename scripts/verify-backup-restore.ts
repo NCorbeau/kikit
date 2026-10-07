@@ -11,6 +11,7 @@ import { migrateDatabase } from '../apps/server/src/migrations.js';
 import { commitUpdate, loadPage } from '../apps/server/src/persistence.js';
 import { validateDocument } from '../apps/server/src/document.js';
 import { findInvitationPage, getSharing, replaceInvitation } from '../apps/server/src/sharing.js';
+import { compactPage } from '../apps/server/src/document-snapshots.js';
 
 type App = Awaited<ReturnType<typeof createServer>>;
 type AccountSession = { accountId: string; sessionId: string; cookie: string };
@@ -176,6 +177,14 @@ async function createCommittedPage(server: App, pool: pg.Pool, session: AccountS
     projectTitle: () => title,
   });
   assert.equal(receipt.sequence, 1);
+  const compacted = await compactPage(pool, pageId, { accountId, sessionId });
+  assert.equal(compacted.snapshotSequence, 1); assert.equal(compacted.prunedUpdates, 1);
+  const tail = await loadPage(pool, pageId, accountId, sessionId);
+  const vector = Y.encodeStateVector(tail.doc);
+  const task = (tail.doc.getXmlFragment('body').get(1) as Y.XmlElement).get(0) as Y.XmlElement;
+  ((task.get(0) as Y.XmlElement).get(0) as Y.XmlText).insert(0, 'Snapshot tail: ');
+  const tailUpdate = Y.encodeStateAsUpdate(tail.doc, vector); tail.doc.destroy();
+  assert.equal((await commitUpdate(pool, pageId, accountId, randomUUID(), tailUpdate, { sessionId })).sequence, 2);
   const invitation = await replaceInvitation(pool, pageId, { accountId, sessionId });
   return { pageId, batchId, update, sequence: receipt.sequence, invitationToken: invitation.token };
 }
@@ -195,6 +204,7 @@ async function verifyRestoredPage(pool: pg.Pool, session: AccountSession, page: 
   assert.equal(duplicate.sequence, sequence);
 
   const recovered = await loadPage(pool, pageId, accountId, sessionId);
+  assert.equal(recovered.snapshotSequence, 1); assert.equal(recovered.sequence, 2);
   assert.equal(recovered.doc.getXmlFragment('title').toString(), `<paragraph>${title}</paragraph>`);
   validateDocument(recovered.doc);
   const list = recovered.doc.getXmlFragment('body').get(1) as Y.XmlElement;
@@ -202,14 +212,14 @@ async function verifyRestoredPage(pool: pg.Pool, session: AccountSession, page: 
   assert.equal(list.nodeName, 'taskList');
   assert.equal(item.nodeName, 'taskItem');
   assert.equal(item.getAttribute('checked'), true);
-  assert.equal((item.get(0) as Y.XmlElement).get(0).toString(), 'Verify restored checklist');
+  assert.equal((item.get(0) as Y.XmlElement).get(0).toString(), 'Snapshot tail: Verify restored checklist');
   const vector = Y.encodeStateVector(recovered.doc);
   (recovered.doc.getXmlFragment('title').get(0) as Y.XmlElement).insert(1, [new Y.XmlText(' continued')]);
   const continued = Y.encodeStateAsUpdate(recovered.doc, vector);
   recovered.doc.destroy();
 
   const receipt = await commitUpdate(pool, pageId, accountId, randomUUID(), continued, { sessionId });
-  assert.equal(receipt.sequence, 2);
+  assert.equal(receipt.sequence, 3);
 }
 
 async function fingerprint(pool: pg.Pool) {
