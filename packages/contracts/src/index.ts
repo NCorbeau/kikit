@@ -1,13 +1,14 @@
 import { z } from 'zod';
+import { MAX_UPDATE_BYTES } from './protocol-schema.js';
+export { PROTOCOL_VERSION, MAX_UPDATE_BYTES } from './protocol-schema.js';
 
-export const PROTOCOL_VERSION = 2;
-export const DOCUMENT_SCHEMA_VERSION = 2;
-export const DATABASE_SCHEMA_VERSION = 6;
+export { DOCUMENT_SCHEMA_VERSION, TITLE_FRAGMENT, BODY_FRAGMENT, MAX_DOCUMENT_BYTES } from './document-schema.js';
+export { validateDocument, validateRepairableDocument } from './document-validation.js';
+export * from './recovery.js';
+
+export const DATABASE_SCHEMA_VERSION = 7;
 export const DEV_ACCOUNT_ID = 'dev-writer';
 export const DEV_PAGE_ID = '00000000-0000-4000-8000-000000000001';
-export const TITLE_FRAGMENT = 'title';
-export const BODY_FRAGMENT = 'body';
-export const MAX_UPDATE_BYTES = 256 * 1024;
 export const MAX_WIRE_BYTES = 400 * 1024;
 export const MAX_PRESENCE_BYTES = 4 * 1024;
 export const MAX_PRESENCE_SNAPSHOT_BYTES = 128 * 1024;

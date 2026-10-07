@@ -43,6 +43,13 @@
       "when": 1791402702016,
       "tag": "0005_document_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791405338253,
+      "tag": "0006_recovery_copy_identity",
+      "breakpoints": true
     }
   ]
 }

@@ -121,6 +121,7 @@ export default function App() {
         onCancelNavigation={navigation.cancel}
         onGuardNavigation={navigation.guard}
         onReplace={replaceWorkspace}
+        onRecovered={page => accept({ ...workspace, pages: [...workspace.pages.filter(existing => existing.id !== page.id), page] })}
         onNotes={refreshNotes}
         onSignedOut={signedOut}
       />

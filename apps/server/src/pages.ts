@@ -45,7 +45,9 @@ export async function listPages(pool: pg.Pool, accountId: string): Promise<PageS
 }
 
 /** Client page ID makes a retried create idempotent. Ownership is checked independently. */
-export async function createPage(pool: pg.Pool, id: string, principal: Principal): Promise<PageSummary> {
+export interface PageInitialization { state: Uint8Array; title: string; inputHash: string }
+
+export async function createPage(pool: pg.Pool, id: string, principal: Principal, initialization?: PageInitialization): Promise<PageSummary> {
   const client = await pool.connect();
   let discard = false;
   try {
@@ -54,12 +56,12 @@ export async function createPage(pool: pg.Pool, id: string, principal: Principal
     await lockSession(db, principal);
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [principal.accountId]);
     const [existing] = await db.select().from(pages).where(eq(pages.id, id)).for('update');
-    if (existing && (existing.ownerId !== principal.accountId || existing.deletedAt)) throw new AccessError('Page access denied');
+    if (existing && (existing.ownerId !== principal.accountId || existing.deletedAt || existing.creationInputHash !== (initialization?.inputHash ?? null))) throw new AccessError('Page access denied');
     if (!existing) {
       const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(pages)
         .where(and(eq(pages.ownerId, principal.accountId), isNull(pages.deletedAt)));
       if (total >= 100) throw new Error('The account has reached the 100-note limit.');
-      await db.insert(pages).values({ id, ownerId: principal.accountId, schemaVersion: DOCUMENT_SCHEMA_VERSION, initialState: Buffer.from(createSeed('', '')) });
+      await db.insert(pages).values({ id, ownerId: principal.accountId, schemaVersion: DOCUMENT_SCHEMA_VERSION, title: initialization?.title ?? '', initialState: Buffer.from(initialization?.state ?? createSeed('', '')), creationInputHash: initialization?.inputHash ?? null });
       await db.insert(pageGrants).values({ pageId: id, accountId: principal.accountId, role: 'owner' });
     }
     const [page] = await db.select({ id: pages.id, title: pages.title, createdAt: pages.createdAt }).from(pages).where(eq(pages.id, id));

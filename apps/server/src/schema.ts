@@ -48,6 +48,7 @@ export const pages = pgTable('pages', {
   schemaVersion: integer('schema_version').notNull(),
   sequence: bigint('sequence', { mode: 'number' }).notNull().default(0),
   initialState: bytea('initial_state').notNull(),
+  creationInputHash: text('creation_input_hash'),
   snapshotState: bytea('snapshot_state'),
   snapshotSequence: bigint('snapshot_sequence', { mode: 'number' }).notNull().default(0),
   createdAt: createdAt(),

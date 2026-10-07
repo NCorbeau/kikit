@@ -14,7 +14,7 @@ The page lock orders deletion behind an already authorized database commit. An o
 
 Only owners see the deletion action. It pauses the document session and waits for local writes before opening the confirmation dialog. Escape/cancel restores editing and menu focus. A failed local save disables confirmation until the in-memory binary recovery file is downloaded. A failed delete request keeps the document alive and offers retry/cancel.
 
-Successful deletion returns the owner to the note list. Connected collaborators lose access before the response returns; disconnected devices learn of deletion when revalidating or reconnecting. Editors are then hidden, with recovery export available. IndexedDB journals, pending batch identities and downloaded copies are not erased. Pending work cannot synchronize to the deleted identity. Recovery import into an authorized new note is a separate v1 slice.
+Successful deletion returns the owner to the note list. Connected collaborators lose access before the response returns; disconnected devices learn of deletion when revalidating or reconnecting. Editors are then hidden, with recovery export available. IndexedDB journals, pending batch identities and downloaded copies are not erased. Pending work cannot synchronize to the deleted identity. The [recovery-import slice](recovery-contract.md) can initialize a distinct private copy for the same account.
 
 Pre-deletion backups can retain the content until expiry; disaster restoration must reconcile known deletions. This is permanent deletion from the live application, not a promise to erase offline devices or every historical backup immediately.
 

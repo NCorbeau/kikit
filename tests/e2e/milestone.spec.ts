@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import WebSocket from 'ws';
 import * as Y from 'yjs';
-import { DEV_ACCOUNT_ID, DEV_PAGE_ID, DOCUMENT_SCHEMA_VERSION, decodeUpdate } from '@kikit/contracts';
+import { DEV_ACCOUNT_ID, DEV_PAGE_ID, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, decodeUpdate } from '@kikit/contracts';
 import { migrateDatabase } from '../../apps/server/src/persistence';
 import { seedDevelopmentPage } from '../../apps/server/src/development-seed';
 import {
@@ -187,7 +187,7 @@ test('recovery download retains offline batch identities after export failure an
   };
   const original = await downloadRecovery();
   expect(original).toMatchObject({
-    format: 'kikit-recovery', formatVersion: 1, schemaVersion: DOCUMENT_SCHEMA_VERSION,
+    format: 'kikit-recovery', formatVersion: 2, protocolVersion: PROTOCOL_VERSION, schemaVersion: DOCUMENT_SCHEMA_VERSION,
     accountId: DEV_ACCOUNT_ID, pageId: DEV_PAGE_ID,
   });
   expect(original.pending.length).toBeGreaterThan(0);
