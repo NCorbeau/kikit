@@ -10,6 +10,7 @@ import { commitUpdate, loadPage } from './persistence.js';
 import { disableInvitation, findInvitationPage, joinInvitation, removeMember } from './sharing.js';
 import { SyncRooms } from './sync-room.js';
 import { TestFaults } from './test-faults.js';
+import { deletePage } from './page-deletion.js';
 
 const databaseUrl = process.env.KIKIT_TEST_DATABASE_URL;
 interface Account { cookie: string; accountId: string; sessionId: string; email: string }
@@ -172,6 +173,77 @@ describe.skipIf(!databaseUrl)('shared pages with distinct authenticated accounts
       expect.objectContaining({ accountId: member.accountId, email: member.email, role: 'editor' }),
     ]) });
     expect(sharing.body).not.toContain(token);
+  });
+
+  it('permanently deletes only for the owner, revokes active access and never resurrects a retried create', async () => {
+    const owner = await login(); const member = await login(); const outsider = await login();
+    const pageId = await create(owner); const token = await invitation(owner, pageId);
+    await join(member, token);
+    const ownerConnection = await connect(owner, pageId); await next(ownerConnection, 'sync');
+    const memberConnection = await connect(member, pageId); const sync = await next(memberConnection, 'sync');
+    const bytes = edit(sync, 'Delete this committed content.'); const batchId = randomUUID();
+    memberConnection.socket.send(JSON.stringify({ type: 'update', batchId, update: encodeUpdate(bytes) }));
+    await next(memberConnection, 'ack', batchId);
+    const url = `/api/pages/${pageId}`;
+    const headers = { origin, cookie: owner.cookie, 'x-kikit-account': owner.accountId };
+    expect((await app.inject({ method: 'DELETE', url, headers: { origin } })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'DELETE', url, headers: { ...headers, origin: 'https://foreign.example' } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'DELETE', url, headers: { ...headers, 'x-kikit-account': member.accountId } })).statusCode).toBe(401);
+    for (const account of [member, outsider]) {
+      expect((await app.inject({ method: 'DELETE', url, headers: { origin, cookie: account.cookie, 'x-kikit-account': account.accountId } })).statusCode).toBe(403);
+    }
+    const deleted = await app.inject({ method: 'DELETE', url, headers });
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.headers['x-kikit-account']).toBe(owner.accountId);
+    expect((await next(ownerConnection, 'error')).code).toBe('ACCESS_DENIED');
+    expect((await next(memberConnection, 'error')).code).toBe('ACCESS_DENIED');
+    const tombstone = (await pool.query('SELECT title, initial_state, deleted_at FROM pages WHERE id=$1', [pageId])).rows[0];
+    expect(tombstone.title).toBe(''); expect(tombstone.initial_state).toHaveLength(0);
+    expect(tombstone.deleted_at).toBeInstanceOf(Date);
+    for (const table of ['document_updates', 'receipts', 'page_invitations', 'page_grants']) {
+      expect((await pool.query(`SELECT count(*)::int AS count FROM ${table} WHERE page_id=$1`, [pageId])).rows[0].count).toBe(0);
+    }
+    expect((await app.inject({ method: 'DELETE', url, headers })).statusCode).toBe(200);
+    expect((await pool.query('SELECT deleted_at FROM pages WHERE id=$1', [pageId])).rows[0].deleted_at).toEqual(tombstone.deleted_at);
+    for (const account of [owner, member]) {
+      expect((await app.inject({ url: `/api/pages/${pageId}/session`, headers: { cookie: account.cookie } })).statusCode).toBe(403);
+      expect((await app.inject({ url: '/api/pages', headers: { cookie: account.cookie } })).json()).not.toContainEqual(expect.objectContaining({ id: pageId }));
+      await expect(commitUpdate(pool, pageId, account.accountId, batchId, bytes, { sessionId: account.sessionId })).rejects.toThrow('Page access denied');
+      expect((await app.inject({ method: 'POST', url: '/api/pages', headers: { origin, cookie: account.cookie }, payload: { id: pageId } })).statusCode).toBe(403);
+    }
+    expect(await findInvitationPage(pool, token)).toBeNull(); await join(member, token, 410);
+  });
+
+  it('rolls back failed deletion and orders deletion behind an authorized in-flight commit', async () => {
+    const owner = await login(); const pageId = await create(owner);
+    const bytes = await storedEdit(owner, pageId, 'Retained if deletion fails.');
+    await commitUpdate(pool, pageId, owner.accountId, randomUUID(), bytes, { sessionId: owner.sessionId });
+    const functionName = `deny_delete_${randomUUID().replaceAll('-', '')}`;
+    await pool.query(`CREATE FUNCTION ${functionName}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Injected deletion failure'; END $$`);
+    await pool.query(`CREATE TRIGGER ${functionName} BEFORE DELETE ON document_updates FOR EACH ROW EXECUTE FUNCTION ${functionName}()`);
+    try {
+      await expect(deletePage(pool, pageId, owner)).rejects.toThrow();
+      expect((await pool.query('SELECT deleted_at FROM pages WHERE id=$1', [pageId])).rows[0].deleted_at).toBeNull();
+      expect((await pool.query('SELECT count(*)::int AS count FROM receipts WHERE page_id=$1', [pageId])).rows[0].count).toBe(1);
+      const loaded = await loadPage(pool, pageId, owner.accountId, owner.sessionId);
+      expect(loaded.doc.getXmlFragment('body').toString()).toContain('Retained if deletion fails.'); loaded.doc.destroy();
+    } finally {
+      await pool.query(`DROP TRIGGER ${functionName} ON document_updates`);
+      await pool.query(`DROP FUNCTION ${functionName}()`);
+    }
+    const laterBytes = await storedEdit(owner, pageId, 'Commit before deletion.');
+    let release!: () => void; let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const committing = commitUpdate(pool, pageId, owner.accountId, randomUUID(), laterBytes, {
+      sessionId: owner.sessionId, beforeCommit: async () => { entered(); await gate; },
+    });
+    await started;
+    const deleting = deletePage(pool, pageId, owner);
+    try { await waitForPageLocks(1); } finally { release(); }
+    expect((await committing).duplicate).toBe(false); await deleting;
+    await expect(loadPage(pool, pageId, owner.accountId, owner.sessionId)).rejects.toThrow('Page access denied');
+    expect((await pool.query('SELECT count(*)::int AS count FROM document_updates WHERE page_id=$1', [pageId])).rows[0].count).toBe(0);
   });
 
   it('allows editor writes while denying private pages and owner-only sharing controls', async () => {

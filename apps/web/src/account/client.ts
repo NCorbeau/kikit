@@ -46,3 +46,14 @@ export async function newPage(id: string, accountId: string) {
   }
   return pageSchema.parse(await response.json());
 }
+
+export async function deleteNote(pageId: string, accountId: string): Promise<void> {
+  const response = await fetch(`/api/pages/${pageId}`, {
+    method: 'DELETE', headers: { 'X-Kikit-Account': accountId }, credentials: 'same-origin',
+  });
+  if (response.status === 401 || (response.ok && response.headers.get('X-Kikit-Account') !== accountId)) {
+    window.dispatchEvent(new Event('kikit-session-ended'));
+    throw new Error('Your account changed. Reopen your notes.');
+  }
+  if (!response.ok) throw new Error('Could not delete the note. Connect and try again.');
+}

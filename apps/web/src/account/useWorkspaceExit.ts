@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { authClient, type Workspace } from './client';
+import { authClient, deleteNote, type Workspace } from './client';
 import type { AppRoute } from '../sharing/routes';
 import type { DocumentSession, SessionSnapshot } from '../session';
 import { downloadRecovery } from '../session/useRecoveryDownload';
@@ -7,6 +7,7 @@ import { downloadRecovery } from '../session/useRecoveryDownload';
 export type WorkspaceExitIntent =
   | { kind: 'notes' }
   | { kind: 'signout' }
+  | { kind: 'delete' }
   | { kind: 'navigate'; route: AppRoute };
 
 export type WorkspaceRecoveryReason = 'access-lost' | 'session-ended';
@@ -101,6 +102,9 @@ export function useWorkspaceExit({
         onNavigate(intent.route);
       } else if (intent?.kind === 'notes') {
         onNotes();
+      } else if (intent?.kind === 'delete') {
+        await deleteNote(pageId, workspace.account!.accountId);
+        onReplace({ ...workspace, pages: workspace.pages.filter(page => page.id !== pageId) });
       } else if (intent?.kind === 'signout') {
         const result = await authClient.signOut();
         if (result.error) throw new Error('Connect and try again to sign out.');

@@ -426,3 +426,95 @@ test('a cookie/account switch during explicit join creates no membership for the
   await expect(member.page.getByRole('button', { name: 'Join note', exact: true })).toBeEnabled();
   await expect(member.page.getByText(replacement.identity.email, { exact: true })).toBeVisible();
 });
+
+test('owner deletion confirms, revokes live collaborators and preserves offline recovery without rejoining', async ({ browser }) => {
+  const owner = await account(browser); const member = await account(browser);
+  const pageId = await createNote(owner.page, 'Delete shared note', 'Committed before deletion.');
+  const { token } = await createInvitation(owner.page); await closeSharing(owner.page);
+  await joinThroughUi(member.page, token);
+  await openHeaderMenu(member.page);
+  await expect(member.page.getByRole('button', { name: 'Delete note', exact: true })).toHaveCount(0);
+  await member.page.keyboard.press('Escape');
+  const device = await account(browser, member.identity.email);
+  await device.page.getByRole('button', { name: 'Delete shared note', exact: true }).click();
+  await serverSaved(device.page);
+  await expect.poll(() => device.page.evaluate(() => document.documentElement.dataset.offlineReady)).toBe('true');
+  await device.context.setOffline(true);
+  await appendBody(device.page, ' Offline draft survives permanent deletion.');
+  await expect(device.page.getByTestId('save-status')).toHaveText('Saved on this device');
+  const before = await downloadRecovery(device.page, 'Download recovery file');
+  expect(before.pending.length).toBeGreaterThan(0);
+
+  await clickHeaderAction(owner.page, 'Delete note');
+  const confirmation = owner.page.getByRole('dialog', { name: 'Delete this note?', exact: true });
+  await expect(confirmation).toBeVisible();
+  await owner.page.keyboard.press('Escape');
+  await expect(confirmation).toHaveCount(0);
+  await expect(owner.page.getByRole('button', { name: 'Note menu', exact: true })).toBeFocused();
+  await expect(pageBody(owner.page)).toHaveAttribute('contenteditable', 'true');
+  await serverSaved(owner.page);
+  await clickHeaderAction(owner.page, 'Delete note');
+  await confirmation.getByRole('button', { name: 'Delete note', exact: true }).click();
+  await expect(owner.page.getByRole('heading', { name: 'Your notes', exact: true })).toBeVisible();
+  await expect(owner.page.getByRole('button', { name: 'Delete shared note', exact: true })).toHaveCount(0);
+  await expect(member.page.getByRole('heading', { name: 'This note is no longer available' })).toBeVisible();
+  await expect(pageBody(member.page)).toHaveCount(0);
+  await device.context.setOffline(false);
+  await expect(device.page.getByRole('heading', { name: 'This note is no longer available' })).toBeVisible();
+  await expect(pageBody(device.page)).toHaveCount(0);
+  const after = await downloadRecovery(device.page);
+  expect(after.pending).toEqual(before.pending);
+  expect(recoveryBody(after)).toContain('Offline draft survives permanent deletion.');
+  expect((await harness.pool.query('SELECT 1 FROM document_updates WHERE page_id=$1', [pageId])).rowCount).toBe(0);
+  expect((await harness.pool.query('SELECT 1 FROM receipts WHERE page_id=$1', [pageId])).rowCount).toBe(0);
+  expect((await device.page.request.post('/api/invitations/join', {
+    headers: { origin: accountOrigin, 'x-kikit-account': member.identity.accountId }, data: { token },
+  })).status()).toBe(410);
+  expect((await owner.page.request.post('/api/pages', {
+    headers: { origin: accountOrigin, 'x-kikit-account': owner.identity.accountId }, data: { id: pageId },
+  })).status()).toBe(403);
+  await device.page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(device.page.getByRole('heading', { name: 'Your notes', exact: true })).toBeVisible();
+  await device.page.reload();
+  await expect(device.page.getByRole('button', { name: 'Delete shared note', exact: true })).toHaveCount(0);
+});
+
+test('owner deletion requires recovery of failed device writes and supports cancellation and retry', async ({ browser }) => {
+  const owner = await account(browser);
+  const pageId = await createNote(owner.page, 'Delete memory draft', 'Stored baseline.');
+  await owner.page.evaluate(() => {
+    const transaction = IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction = function(...args: Parameters<IDBDatabase['transaction']>) {
+      if (args[1] === 'readwrite') throw new DOMException('Injected quota failure', 'QuotaExceededError');
+      return transaction.apply(this, args);
+    };
+  });
+  await appendBody(owner.page, ' Memory-only draft must be exported.');
+  await expect(owner.page.getByTestId('save-status')).toHaveText('Device save failed');
+  await clickHeaderAction(owner.page, 'Delete note');
+  const confirmation = owner.page.getByRole('dialog', { name: 'Delete this note?', exact: true });
+  const remove = confirmation.getByRole('button', { name: 'Delete note', exact: true });
+  await expect(remove).toBeDisabled();
+  await owner.page.keyboard.press('Escape');
+  await expect(confirmation).toHaveCount(0);
+  await expectDocumentContains(pageBody(owner.page), 'Memory-only draft must be exported.');
+  await clickHeaderAction(owner.page, 'Delete note');
+  await expect(remove).toBeDisabled();
+  const recovery = await downloadRecovery(owner.page, 'Download recovery', confirmation);
+  expect(recoveryBody(recovery)).toContain('Memory-only draft must be exported.');
+  expect(recovery.pending.length).toBeGreaterThan(0);
+  await expect(remove).toBeEnabled();
+  let failOnce = true;
+  await owner.page.route(`**/api/pages/${pageId}`, async route => {
+    if (route.request().method() === 'DELETE' && failOnce) {
+      failOnce = false;
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Unavailable' }) });
+    } else await route.continue();
+  });
+  await remove.click();
+  await expect(confirmation.getByRole('alert').last()).toContainText('Connect and try again');
+  expect((await harness.pool.query('SELECT deleted_at FROM pages WHERE id=$1', [pageId])).rows[0].deleted_at).toBeNull();
+  await remove.click();
+  await expect(owner.page.getByRole('heading', { name: 'Your notes', exact: true })).toBeVisible();
+  expect((await harness.pool.query('SELECT deleted_at FROM pages WHERE id=$1', [pageId])).rows[0].deleted_at).not.toBeNull();
+});

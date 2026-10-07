@@ -26,7 +26,7 @@ The auth limiter is enabled (60 requests/minute globally per IP, with the magic-
 | `/api/sync` | Authenticated WebSocket; page access checked on join and every update |
 | `GET /api/health` | 200 only when the database is reachable with the application's expected schema version: 2 for the original account slice, 3 after shared pages |
 
-Each new note is initialized once with an empty title and one empty body paragraph. The owner grant is created in the same transaction. Creation is serialized per account and bounded to 100 owned notes as an initial resource guardrail. Deletion remains deferred. The [shared-page slice](shared-pages-contract.md) adds invitation and membership controls with database schema 3.
+Each new note is initialized once with an empty title and one empty body paragraph. The owner grant is created in the same transaction. Creation is serialized per account and bounded to 100 active owned notes as an initial resource guardrail. The [permanent deletion slice](deletion-contract.md) adds owner-only deletion and reserves deleted IDs against create retries. The [shared-page slice](shared-pages-contract.md) adds invitation and membership controls with database schema 3.
 
 ## Revocation and durable writes
 
@@ -44,6 +44,6 @@ Before navigation/logout, the session pauses editing and transport, then settles
 
 ## Release boundary
 
-The slice covers magic-link accounts and private notes. Same-account devices synchronize through the custom backend. The [shared-page slice](shared-pages-contract.md) adds invitations, membership management, revocation recovery and transient presence/cursors, advancing the wire protocol to 2 and database schema to 3. Note deletion remains deferred. Hosted private-page denial and two-account sharing passed on 2026-10-02 under the [recorded conditions](verification.md#2026-10-02-hosted-shared-page-rollout-and-two-account-proof).
+The slice covers magic-link accounts and private notes. Same-account devices synchronize through the custom backend. The [shared-page slice](shared-pages-contract.md) adds invitations, membership management, revocation recovery and transient presence/cursors, advancing the wire protocol to 2 and database schema to 3. Owner-only deletion is now implemented in the [database-schema-5 slice](deletion-contract.md). Hosted private-page denial and two-account sharing passed on 2026-10-02 under the [recorded conditions](verification.md#2026-10-02-hosted-shared-page-rollout-and-two-account-proof).
 
 See [verification](verification.md) for executed checks and [deployment](deployment.md) for hosted setup. Real email login, HTTPS cookie attributes, private synchronization/isolation and logout recovery have recorded hosted evidence. Natural session renewal/expiry remains open. Scheduled Railway backups and a hosted restore must still be tested before valuable production notes are stored.
