@@ -14,7 +14,11 @@ The integration command includes real subprocess and TCP checks as of 2026-10-07
 
 A loopback TCP proxy forwards the actual PostgreSQL COMMIT packet while dropping its server response. An independent database connection observes the committed receipt, the blocked worker is killed, and retrying its original ID/bytes resolves that outcome exactly once. This verifies an unknown successful commit through real `pg` transport, beyond an injected post-commit exception.
 
-These checkpoints do not exhaust every instruction or packet race. Killing a worker is not a hosted database crash, power-loss test or permanent network partition. The PostgreSQL process remains running.
+A separate [application subprocess](../apps/server/src/fixtures/crash-app.ts) starts the full `createServer` HTTP/WebSocket application on loopback. Its existing test-only fault route withholds one author acknowledgement after COMMIT, while an independent PostgreSQL connection confirms the receipt and another socket observes the committed update. OS `SIGKILL` terminates that application without graceful shutdown. A new application process against the same stored schema hydrates the room to sequence 1; retrying the exact original UUID/bytes returns its original receipt with one update row. A continued edit commits at sequence 2, reaches a new peer in order, and reconstructs the same binary state from PostgreSQL. This case uses the explicit development fixture identity under `NODE_ENV=test`; authenticated accounts and browser journals remain separate checks.
+
+The focused seven-case hard-crash file passed on 2026-10-07 against PostgreSQL 17.9 on `127.0.0.1:54329/kikit_e2e`, using unique temporary schemas: 4.50 seconds for the file, 1.67 seconds for the full-application case. The full sequential `pnpm test:integration` then passed all 58 tests across seven files in 18.08 seconds, including the full-application case and separate authenticated account/sharing/presence checks. Server typecheck passed. The existing integration command already includes this file.
+
+These checkpoints do not exhaust every instruction or packet race. Neither killing a worker nor killing the full application is a hosted database crash, power-loss test or permanent network partition. The PostgreSQL process remains running.
 
 ## Socket overload and slow recipients
 
