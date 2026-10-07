@@ -39,8 +39,13 @@ export function LeavePageDialog({
       onKeyDown={containDialogFocus}
     >
       <h2 id="leave-title">{title}</h2>
+      {intent.kind === 'delete' && (
+        <p>This permanently deletes the note for everyone and disables its invitation. There is no Trash or undo.</p>
+      )}
       <p>
-        {pending > 0
+        {intent.kind === 'delete'
+          ? 'Local copies and drafts are kept on their devices. Download recovery to keep a copy; drafts cannot synchronize to this deleted note.'
+          : pending > 0
           ? 'Pending changes will stay on this device for this account. Sign in again to synchronize them, or download a recovery file.'
           : 'Your saved notes will stay on this device for this account.'}
       </p>
@@ -60,6 +65,7 @@ export function LeavePageDialog({
 }
 
 function exitCopy(intent: WorkspaceExitIntent) {
+  if (intent.kind === 'delete') return { title: 'Delete this note?', action: 'Delete note' };
   if (intent.kind === 'signout') return { title: 'Sign out?', action: 'Sign out' };
   if (intent.kind === 'navigate') {
     if (intent.route.kind === 'join') return { title: 'Open invitation?', action: 'Open invitation' };

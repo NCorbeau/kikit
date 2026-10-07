@@ -58,6 +58,11 @@ async function verifyRestore() {
     });
     const session = await signIn(app, runtime, () => magicLink);
     const page = await createCommittedPage(app, runtime, session);
+    const deletedId = randomUUID();
+    assert.equal((await app.inject({ method: 'POST', url: '/api/pages', headers: { origin, cookie: session.cookie },
+      payload: { id: deletedId } })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'DELETE', url: `/api/pages/${deletedId}`,
+      headers: { origin, cookie: session.cookie, 'x-kikit-account': session.accountId } })).statusCode, 200);
     await app.close();
     app = undefined;
 
@@ -77,6 +82,11 @@ async function verifyRestore() {
     });
     await verifyRestoredSession(app, session);
     await verifyRestoredPage(restoredRuntime, session, page);
+    assert.equal((await app.inject({ url: `/api/pages/${deletedId}/session`, headers: { cookie: session.cookie } })).statusCode, 403);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/pages', headers: { origin, cookie: session.cookie },
+      payload: { id: deletedId } })).statusCode, 403);
+    assert.equal((await app.inject({ method: 'DELETE', url: `/api/pages/${deletedId}`,
+      headers: { origin, cookie: session.cookie, 'x-kikit-account': session.accountId } })).statusCode, 200);
   } finally {
     await cleanup();
   }

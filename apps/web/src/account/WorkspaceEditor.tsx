@@ -64,6 +64,12 @@ export function WorkspaceEditor(props: WorkspaceEditorProps) {
         actionsDisabled={exit.busy}
         onSignOut={signOut}
         shareAction={isOwner && <ShareControls pageId={pageId} accountId={account.accountId} disabled={sharingDisabled} />}
+        deleteAction={isOwner && (
+          <button type="button" disabled={exit.busy || exit.intent !== null || snapshot.connection === 'offline' || !snapshot.ready}
+            onClick={() => { void exit.requestLeave({ kind: 'delete' }); }}>
+            Delete note
+          </button>
+        )}
       />
       {exit.intent && exit.confirmationRequired && (
         <LeavePageDialog

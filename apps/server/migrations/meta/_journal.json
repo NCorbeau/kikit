@@ -29,6 +29,13 @@
       "when": 1791147558185,
       "tag": "0003_task_lists",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791402058324,
+      "tag": "0004_page_deletion",
+      "breakpoints": true
     }
   ]
 }

@@ -81,7 +81,11 @@ Authorized collaborators appear above the document with colored cursors and sele
 
 Choose **To-do list** in the formatting controls, or type `[ ] ` at the start of a paragraph. `[x] ` creates a completed item. Enter adds an unchecked item; Enter on an empty item returns to ordinary text. **Text** or a heading control converts the selected items back to ordinary blocks. Checkboxes can be focused with Tab and toggled with Space. Completed items stay in place. Lists support the same local persistence, offline recovery, synchronization and collaborative undo as text.
 
-This source adds document schema 2 and database schema 4 while retaining wire protocol 2. Existing notes and pending browser journals are upgraded without replacing binary history or batch identities. It requires a matching web/server rollout and the new migration; the 2026-10-05 Railway rollout applied these versions; hosted checklist interaction/sync remains unverified. See [the task-list contract](docs/task-lists-contract.md).
+The task-list slice adds document schema 2 and database schema 4 while retaining wire protocol 2. Existing notes and pending browser journals are upgraded without replacing binary history or batch identities. The 2026-10-05 Railway rollout applied these versions; hosted checklist interaction/sync remains unverified. This source now requires database schema 5 for note deletion; it is not deployed. See [the task-list contract](docs/task-lists-contract.md) and [deletion contract](docs/deletion-contract.md).
+
+## Deleting notes
+
+Owners can choose **Delete note** in the note menu and confirm permanent deletion for everyone. There is no Trash or undo. Shared access and invitations end; delayed create retries cannot recreate the note. Local drafts remain recoverable. If device saving fails, download recovery before confirming deletion. See [the deletion and recovery policy](docs/data-policy.md).
 
 ## Development identity boundary
 
@@ -158,12 +162,12 @@ The [GitHub Actions workflow](.github/workflows/quality.yml) runs code quality, 
 - Full-state handshakes and retained binary update histories; no snapshot compaction/pruning. Updates are limited to 256 KiB and committed documents to 2 MiB. These are guardrails, not measured capacity claims.
 - Queues admit at most 64 operations/8 MiB per page and 256 operations/32 MiB globally, including running work. At most 128 sockets; each socket has a 4 MiB outbound budget. Overload leaves uncommitted edits pending.
 - PostgreSQL applies 5-second statement, 2-second lock, and 15-second transaction limits. Queue ownership stays with an operation until completion/rollback. Shutdown stops admission, rejects queued work, and waits for active operations; a network blackhole can still delay shutdown. No deployment deadline or production availability target is claimed.
-- Binary recovery export has no import UI yet. The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; backups and hosted restoration remain deferred until before valuable notes. No performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
+- Binary recovery export has no import UI yet. Recovery import, document compaction and stylesheet refactoring are required before v1. The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; scheduled backups and hosted restoration remain unimplemented release gates. No performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
 - The Docker image serves the production bundle. Hosted private-account and two-account sharing checks have dated evidence; natural session renewal/expiry remains unverified. The editor bundle produces Vite's large-chunk advisory.
 
-The next release gates are hosted renewal/expiry and tested hosted backups before valuable notes. Page deletion awaits its retention/recovery policy. Hosted sharing is verified under the recorded Chromium conditions; broader failure/browser/accessibility evidence and performance remain separate work. This does not establish complete v1 readiness.
+The [v1 release checklist](docs/v1-release.md) tracks the agreed remaining work, including hosted renewal/expiry, tested backups, recovery import and compaction. Permanent owner-only deletion is implemented locally and requires migration/deployment before hosted use. Hosted sharing is verified under the recorded Chromium conditions; broader failure/browser/accessibility evidence and performance remain separate gates. This does not establish complete v1 readiness.
 
-The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, with scheduled backups deferred for disposable test notes. Tested backups and restoration are required before valuable notes. The sharing rollout retained one application instance and the existing private-network PostgreSQL service. See [deployment](docs/deployment.md) for rollout and recovery limits.
+The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free. Daily backups with six-day retention, up to 24 hours of server-data loss and restoration within four hours after recovery starts are accepted targets to configure and test; cost review precedes paid resources. Tested hosted backups and restoration are required before valuable notes. The sharing rollout retained one application instance and the existing private-network PostgreSQL service. See [deployment](docs/deployment.md) for rollout and recovery limits.
 
 ## License
 
