@@ -1,0 +1,23 @@
+.account-panel { width: min(560px, calc(100% - 48px)); margin: 88px auto; }
+.account-panel h1 { font-size: 28px; font-weight: 600; letter-spacing: -0.03em; }
+.account-panel p { line-height: 1.6; color: var(--muted); }
+.account-panel form { display: grid; gap: 12px; margin-top: 28px; }
+.account-panel label { font-size: 13px; }
+.account-panel input { width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+.account-panel button, .leave-dialog button { padding: 9px 13px; border: 0; border-radius: var(--radius); background: transparent; }
+.account-panel button:hover:not(:disabled), .leave-dialog button:hover:not(:disabled) { background: var(--hover); }
+.account-panel input:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.account-panel .primary-button, .leave-dialog .primary-button { background: var(--ink); color: var(--surface); }
+.account-panel .primary-button:hover:not(:disabled), .leave-dialog .primary-button:hover:not(:disabled) { background: var(--ink); opacity: 0.85; }
+.primary-button:disabled { opacity: 0.5; }
+.account-error { color: var(--error) !important; }
+.notes-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.note-list { list-style: none; padding: 0; margin-top: 28px; }
+.note-list li { border-bottom: 1px solid var(--line); }
+.note-list button { width: 100%; text-align: left; padding: 16px 0; font-size: 16px; overflow-wrap: anywhere; }
+.account-email { font-size: 13px; }
+.leave-dialog { width: min(480px, calc(100% - 32px)); padding: 28px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); box-shadow: 0 12px 40px rgb(0 0 0 / 0.16); }
+.leave-dialog::backdrop { background: rgb(0 0 0 / 0.35); }
+.leave-dialog h2 { margin-top: 0; font-size: 20px; }
+.leave-dialog p { line-height: 1.6; }
+
