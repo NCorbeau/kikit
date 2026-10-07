@@ -6,6 +6,7 @@ export default defineConfig({
   reporter: process.env.CI ? [['./scripts/ci-browser-reporter.ts', { outputDir: './test-results/accounts' }]] : 'list',
   projects: [
     { name: 'accounts', testMatch: 'accounts.spec.ts' },
+    { name: 'accessibility', testMatch: 'accessibility.spec.ts' },
     { name: 'recovery', testMatch: 'recovery.spec.ts' },
     { name: 'sharing', testMatch: 'sharing.spec.ts' },
     { name: 'presence', testMatch: 'presence.spec.ts' },
