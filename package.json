@@ -17,7 +17,7 @@
     "build": "pnpm -r build",
     "test": "vitest run",
     "test:e2e": "tsx scripts/prepare-test-db.ts && playwright test",
-    "test:integration": "tsx scripts/prepare-test-db.ts && KIKIT_TEST_DATABASE_URL=postgres://kikit:kikit_local_only@127.0.0.1:54329/kikit_e2e vitest run --no-file-parallelism apps/server/src/server.integration.test.ts apps/server/src/migrations.integration.test.ts apps/server/src/accounts.integration.test.ts apps/server/src/sharing.integration.test.ts apps/server/src/presence.integration.test.ts",
+    "test:integration": "tsx scripts/prepare-test-db.ts && KIKIT_TEST_DATABASE_URL=postgres://kikit:kikit_local_only@127.0.0.1:54329/kikit_e2e vitest run --no-file-parallelism apps/server/src/server.integration.test.ts apps/server/src/migrations.integration.test.ts apps/server/src/accounts.integration.test.ts apps/server/src/sharing.integration.test.ts apps/server/src/presence.integration.test.ts apps/server/src/hard-crash.integration.test.ts apps/server/src/socket-pressure.integration.test.ts",
     "db:generate": "pnpm --filter @kikit/server db:generate",
     "start": "pnpm --filter @kikit/server start",
     "db:migrate:production": "NODE_ENV=production pnpm --filter @kikit/server exec tsx src/migrate.ts",
