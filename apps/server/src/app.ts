@@ -14,6 +14,7 @@ import { SyncRooms } from './sync-room.js';
 import { attachSyncConnection } from './sync-connection.js';
 import { registerTestRoutes, TestFaults } from './test-faults.js';
 import { registerSharingRoutes } from './sharing-routes.js';
+import { registerRecoveryRoute } from './recovery-route.js';
 import { registerPageDeletionRoute } from './page-deletion-route.js';
 import { acquireServerOwnership, registerServerLifecycle } from './server-lifecycle.js';
 
@@ -82,6 +83,7 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
     registerAccountRoutes(app, pool, identity, fixture);
     registerSharingRoutes(app, pool, rooms, identity);
     registerPageDeletionRoute(app, pool, rooms, identity);
+    registerRecoveryRoute(app, pool, identity);
     registerTestRoutes(app, faults, () => ({ ...rooms.queues.metrics, snapshots: rooms.snapshotMetrics,
       rooms: rooms.size, connections: connections.size }));
     app.get('/api/sync', {

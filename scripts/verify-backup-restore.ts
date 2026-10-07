@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
 import * as Y from 'yjs';
+import { DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, encodeUpdate } from '@kikit/contracts';
 import { createServer } from '../apps/server/src/app.js';
 import { migrateDatabase } from '../apps/server/src/migrations.js';
 import { commitUpdate, loadPage } from '../apps/server/src/persistence.js';
@@ -59,6 +60,16 @@ async function verifyRestore() {
     });
     const session = await signIn(app, runtime, () => magicLink);
     const page = await createCommittedPage(app, runtime, session);
+    const loaded = await loadPage(runtime, page.pageId, session.accountId, session.sessionId);
+    const recoveryFile = JSON.stringify({ format: 'kikit-recovery', formatVersion: 2, protocolVersion: PROTOCOL_VERSION,
+      schemaVersion: DOCUMENT_SCHEMA_VERSION, accountId: session.accountId, pageId: page.pageId,
+      exportedAt: new Date().toISOString(), update: encodeUpdate(Y.encodeStateAsUpdate(loaded.doc)), pending: [], cachedUpdates: [] });
+    loaded.doc.destroy();
+    const copyId = randomUUID();
+    const copyRequest = { method: 'POST' as const, url: '/api/recovery/copies',
+      headers: { origin, cookie: session.cookie, 'x-kikit-account': session.accountId }, payload: { id: copyId, recovery: recoveryFile } };
+    assert.equal((await app.inject(copyRequest)).statusCode, 200);
+    const copySeed = (await runtime.query('SELECT initial_state FROM pages WHERE id=$1', [copyId])).rows[0].initial_state;
     const deletedId = randomUUID();
     assert.equal((await app.inject({ method: 'POST', url: '/api/pages', headers: { origin, cookie: session.cookie },
       payload: { id: deletedId } })).statusCode, 200);
@@ -83,6 +94,16 @@ async function verifyRestore() {
     });
     await verifyRestoredSession(app, session);
     await verifyRestoredPage(restoredRuntime, session, page);
+    assert.equal((await app.inject(copyRequest)).statusCode, 200);
+    assert.deepEqual((await restoredRuntime.query('SELECT initial_state FROM pages WHERE id=$1', [copyId])).rows[0].initial_state, copySeed);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/pages', headers: copyRequest.headers, payload: { id: copyId } })).statusCode, 403);
+    const recoveredCopy = await loadPage(restoredRuntime, copyId, session.accountId, session.sessionId);
+    validateDocument(recoveredCopy.doc);
+    assert.equal(recoveredCopy.doc.getXmlFragment('title').toString(), `<paragraph>${title}</paragraph>`);
+    const copyVector = Y.encodeStateVector(recoveredCopy.doc);
+    (recoveredCopy.doc.getXmlFragment('title').get(0) as Y.XmlElement).insert(1, [new Y.XmlText(' copy continued')]);
+    const copyUpdate = Y.encodeStateAsUpdate(recoveredCopy.doc, copyVector); recoveredCopy.doc.destroy();
+    assert.equal((await commitUpdate(restoredRuntime, copyId, session.accountId, randomUUID(), copyUpdate, { sessionId: session.sessionId })).sequence, 1);
     assert.equal((await app.inject({ url: `/api/pages/${deletedId}/session`, headers: { cookie: session.cookie } })).statusCode, 403);
     assert.equal((await app.inject({ method: 'POST', url: '/api/pages', headers: { origin, cookie: session.cookie },
       payload: { id: deletedId } })).statusCode, 403);
@@ -291,7 +312,7 @@ async function cleanup() {
 try {
   await verifyRestore();
   if (!process.exitCode) {
-    console.log('Local backup restore passed: account/session/invitation, exact binary records and receipt identity, continued writes, and runtime DDL denial.');
+    console.log('Local backup restore passed: account/session/invitation, exact binary records and receipt identity, recovery-copy retry identity, continued writes, and runtime DDL denial.');
   }
 } catch {
   // Driver/assertion errors may contain cookies, passwords, or note records.

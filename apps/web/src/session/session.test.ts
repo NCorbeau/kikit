@@ -54,6 +54,11 @@ class MemoryStore implements DocumentStore {
     if (!this.records.some(saved => saved.id === record.id)) this.records.push(record);
     this.initialized ||= initialized;
   }
+  async importUpdates(records: StoredUpdate[]) {
+    if (this.saveError) throw new Error('Device storage failed.');
+    for (const record of records) if (!this.records.some(saved => saved.id === record.id)) this.records.push(record);
+    return this.records;
+  }
   async acknowledge(id: string) {
     if (this.ackError) throw new Error('Device receipt storage failed.');
     this.records = this.records.map(record => record.id === id ? { ...record, pending: false } : record);

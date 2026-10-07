@@ -1,0 +1,45 @@
+# Binary recovery import
+
+Implemented locally on 2026-10-07. Document schema 2 and wire protocol 2 remain unchanged; database schema 7 adds `pages.creation_input_hash` for retry-safe initialization of private recovery copies. This is not deployed. See [release evidence](verification.md) and [data policy](data-policy.md).
+
+## File and account boundary
+
+**Import recovery file** is available in the app and note menus for signed-in accounts. The note menu offers **Merge into this note** when the file names that mounted page; both menus offer **Recover new private copy**. To merge from the note list, open the original note first. A copy does not require access to the original page, which may have been deleted or revoked. Downloaded copies cannot be recalled.
+
+Exports now use `format: kikit-recovery`, format version 2, document schema 2 and protocol 2. They include the account/page IDs, export time, full binary Yjs state, pending batch UUIDs and exact bytes, and any incompatible cached records retained for recovery. The file is never rewritten or deleted by import. Version 1 files with schema 2 are accepted without a protocol field; schema-1 files are accepted only when their paragraph/heading document can be validated unchanged. Promotion changes the interpretation of compatible metadata, not the binary identity or content.
+
+The shared parser rejects future/unsupported versions, invalid metadata/base64, trailing binary data, unresolved dependencies, unknown fragments/nodes/attributes, duplicate pending UUID aliases, pending content/deletions missing from the full state, and conflicting visible content under reused Yjs identities. Incompatible cached records require a compatible application version; they are not partially stripped. The same account ID must match the mounted account, and original-note import also requires the same page ID.
+
+File metadata is not a cryptographic signature or a grant. Its account check prevents accidental imports into another account. Server authorization remains independent; ownership, credentials, invitations and membership are never recovered from document bytes.
+
+Limits are 16 MiB UTF-8 JSON, 4,096 pending batches, 2 MiB full binary state and 256 KiB per pending batch. These are bounded resource guards, not supported-capacity measurements. A rejected or oversized file stays available for another recovery path or compatible application.
+
+## Merge into the original
+
+1. Fetch `GET /api/pages/:pageId/recovery-state` online with the mounted-account header. The route validates the real session/account and reads the seed or snapshot plus ordered update tail under session/page/grant locks. Its `no-store` response binds the account/page and document/protocol versions to the full committed binary state. The client verifies those bindings and bytes before import; a cached document or previous handshake is not evidence of what a restored server currently contains.
+2. Pause editing/transport and settle existing local writes. Failed memory-only writes block merging and remain available for retry/export.
+3. Read the canonical account/page journal and stage all its bytes, the current document, source pending bytes and full source state in an isolated Y.Doc. Validate the merged document without changing the editable instance. Test each actual outbound prefix against fresh committed state, excluding source identities already acknowledged in the local journal. Detect missing history and out-of-order dependencies, including history the device marked acknowledged before a server restore.
+4. When history is missing or ordered replay cannot apply independently, derive one prerequisite binary batch against the fresh committed state vector, including the parents needed by dependent edits. Verify that applying this batch to committed state alone resolves all dependencies and passes repairable-document validation. In one strict IndexedDB transaction, first verify that the canonical journal's ordered IDs/bytes/pending markers still match the staged read, then place the prerequisite **before every existing and imported pending batch** and append the imported IDs/bytes. A concurrent append or acknowledgement in another tab rejects before mutation and offers retry. Durable order survives reload. Original pending IDs/bytes and acknowledged flags remain unchanged; a reused ID with different bytes aborts the whole import. No partial journal import or editable-document change occurs on transaction failure.
+5. After that transaction commits, apply binary state to the live document and resume normal authorized synchronization. Existing edits merge through Yjs; the server resolves original pending identities through their durable receipts.
+
+Import does not claim a server save until normal acknowledgements arrive. The committed-state read establishes a locked boundary, not a lease or permission to write: a revocation, expiry or later restore can reject subsequent synchronization. The committed local journal and source file remain recoverable. Re-importing an already-covered state does not generate another deletion-only batch or turn old local receipts pending.
+
+UUID case aliases target the same PostgreSQL receipt. Import compares them case-insensitively while retaining the existing journal spelling, bytes, order and acknowledged marker. Different bytes under an alias abort the whole import; conflicting legacy alias records remain untouched for recovery.
+
+The independently applicable prerequisite must fit the existing 256 KiB wire-update guard, and the merged document remains subject to the 2 MiB document bound. If the prerequisite is too large or unresolved, original-note merge is rejected before local mutation, with an explicit new-private-copy alternative. The HTTP route only reads committed bytes; recovered writes continue through the normal journal, WebSocket and receipt path. Import does not raise protocol limits or use a whole-document REST save endpoint. It can retain transient empty containers for normal server normalization at commit.
+
+## Recover a new private copy
+
+`POST /api/recovery/copies` is an authenticated, same-origin initialization route with a mandatory mounted-account header and bounded request body. The backend revalidates the file, retains binary Yjs identities/history, and normalizes only valid empty containers before initializing a distinct page once. The account/page/session transaction creates its owner grant; no source grant, invitation or receipt is copied. The 100-active-owned-note guard still applies.
+
+The client retains one fresh destination UUID across a failed request/retry. The server hashes the original binary input and source context before adding any random normalization IDs. Under session, account-admission and page locks, an existing destination must belong to the same account, be live, and have the same initialization hash. A response-loss retry returns the existing page without reseeding or overwriting subsequent edits. Another input, ordinary create retry or deleted destination is denied. Deletion also clears the initialization hash, leaving the content-free tombstone.
+
+The copy uses a new page-scoped synchronization/receipt namespace. Source batch identities remain in the original file/journal; they are not interpreted as writes to the new page. Subsequent edits use the normal local journal and custom WebSocket flow. Server initialization is the sole seed; clients never initialize an empty collaborative page independently.
+
+Account replacement invalidates pending file reads, original-state continuations and copy callbacks. A late original-state response cannot import into the retained old-account journal. A late copy response may leave a successfully created copy in its original account, but cannot reopen that account's stale workspace. Leaving a memory-only current draft for a copy still uses the existing recovery/export guard.
+
+## Evidence and limits
+
+Focused parser/session checks cover compatibility, corruption, identity conflicts, real IndexedDB rollback, current memory-only failures, receipt preservation, deleted-history repeats and the oversized-merge alternative. Authenticated browser checks cover offline-file merge with concurrent edits, repeat import, exact original receipts, deleted-source private copies, wrong-account/corrupt-file denial, a lost copy response, focus restoration and delayed responses during account replacement. The logical restore drill includes copy initialization hashes and retry identity.
+
+These local checks do not prove hosted recovery, arbitrary future-schema conversion, physical-device storage durability, or recovery from browser eviction without an existing file/backup. Hosted backups and restoration are separate [release gates](v1-release.md).

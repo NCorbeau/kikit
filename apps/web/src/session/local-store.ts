@@ -17,6 +17,7 @@ export interface DocumentStore {
   load(): Promise<StoredDocument>;
   append(record: StoredUpdate, initialized?: boolean): Promise<void>;
   acknowledge(id: string): Promise<void>;
+  importUpdates(records: StoredUpdate[], prerequisite?: StoredUpdate, expected?: StoredDocument): Promise<StoredUpdate[]>;
   close(): void;
 }
 
@@ -62,6 +63,12 @@ function isCompatible(metadata: Metadata): boolean {
 
 function sameBytes(first: Uint8Array, second: Uint8Array): boolean {
   return first.length === second.length && first.every((byte, index) => byte === second[index]);
+}
+
+function batchIdentity(id: string): string {
+  // PostgreSQL UUID receipts ignore spelling case. Keep the original local ID
+  // and leave non-UUID legacy/test identities unchanged.
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id.toLowerCase() : id;
 }
 
 /** Version 1 never contained lists. Check the merged legacy view before advancing
@@ -213,6 +220,57 @@ export class LocalStore implements DocumentStore {
         });
       },
     );
+  }
+
+  /** The complete import commits together; existing receipts never become pending again. */
+  async importUpdates(records: StoredUpdate[], prerequisite?: StoredUpdate, expected?: StoredDocument): Promise<StoredUpdate[]> {
+    let journal: StoredUpdate[] = [];
+    await this.writeTransaction('Could not save recovery on this device. Keep the file and try again.', async (transaction, metadata) => {
+      const current = (await readJournal(transaction)).cache;
+      if (expected) {
+        if (current.initialized !== expected.initialized || current.updates.length !== expected.updates.length
+          || current.updates.some((record, index) => {
+            const previous = expected.updates[index];
+            return record.id !== previous.id || record.pending !== previous.pending || !sameBytes(record.update, previous.update);
+          })) {
+          throw new Error('This note changed in another tab during recovery. Keep the file and try importing again.');
+        }
+      }
+      const updates = transaction.objectStore('updates');
+      const identities = new Map<string, StoredUpdate>();
+      for (const record of current.updates) {
+        const identity = batchIdentity(record.id);
+        const previous = identities.get(identity);
+        if (previous && !sameBytes(previous.update, record.update)) throw new Error('A recovery batch conflicts with this device. Keep the file and recover a private copy.');
+        if (!previous) identities.set(identity, record);
+      }
+      if (prerequisite) {
+        const identity = batchIdentity(prerequisite.id);
+        const saved = identities.get(identity);
+        if (saved && !sameBytes(saved.update, prerequisite.update)) throw new Error('A recovery batch conflicts with this device. Keep the file and recover a private copy.');
+        if (!saved) {
+          // Explicit numeric keys may be zero/negative. Preserve every existing
+          // ordinal while making history repair the first durable outbound batch
+          // even after reload, ahead of already queued dependent device edits.
+          const first = await updates.openCursor();
+          await updates.add({ ...prerequisite, ordinal: (first?.primaryKey ?? 1) - 1 });
+          identities.set(identity, prerequisite);
+        }
+      }
+      for (const record of records) {
+        const identity = batchIdentity(record.id);
+        const saved = identities.get(identity);
+        if (saved && !sameBytes(saved.update, record.update)) throw new Error('A recovery batch conflicts with this device. Keep the file and recover a private copy.');
+        if (!saved) {
+          await updates.add(record);
+          identities.set(identity, record);
+        }
+      }
+      await transaction.objectStore('metadata').put({ key: 'document', schemaVersion: DOCUMENT_SCHEMA_VERSION,
+        formatVersion: LOCAL_FORMAT_VERSION, initialized: metadata?.initialized ?? false });
+      journal = (await readJournal(transaction)).cache.updates;
+    });
+    return journal;
   }
 
   async acknowledge(id: string): Promise<void> {

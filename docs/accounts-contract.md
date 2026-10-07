@@ -22,6 +22,7 @@ The auth limiter is enabled (60 requests/minute globally per IP, with the magic-
 | `GET /api/session` | Current account identity, or 401 |
 | `GET /api/pages` | Granted pages only; `X-Kikit-Account` identifies the response account |
 | `POST /api/pages` | Client UUID; retry preserves initial Yjs identity; another owner's UUID is denied |
+| `POST /api/recovery/copies` | Same-account binary recovery initialization; stable destination UUID/hash retries; private owner grant |
 | `GET /api/pages/:pageId/session` | Authorized identity and document/protocol versions |
 | `/api/sync` | Authenticated WebSocket; page access checked on join and every update |
 | `GET /api/health` | 200 only when the database is reachable with the application's expected schema version: 2 for the original account slice, 3 after shared pages |
@@ -40,7 +41,7 @@ Document journals use the existing IndexedDB format, namespaced by account and p
 
 Sign-out removes the offline hint and retains journals. No cache removal is automatic. Listing and creation responses identify their account so a cookie change between requests cannot place another account's response in the mounted workspace. Polling, focus, online events, and cross-tab storage events detect session/account changes.
 
-Before navigation/logout, the session pauses editing and transport, then settles local persistence. Pending committed journal records remain for the same account's next login. Failed local writes remain in memory; leaving is blocked until recovery export succeeds. Session changes and access loss hide the previous editor while keeping its session alive for export, then release it only after the user continues. Recovery files contain binary document state and stable pending batch identities; there is no import UI yet.
+Before navigation/logout, the session pauses editing and transport, then settles local persistence. Pending committed journal records remain for the same account's next login. Failed local writes remain in memory; leaving is blocked until recovery export succeeds. Session changes and access loss hide the previous editor while keeping its session alive for export, then release it only after the user continues. Recovery files contain binary document state and stable pending batch identities; the [recovery-import slice](recovery-contract.md) supports an authorized original-note merge and a distinct private copy.
 
 ## Release boundary
 

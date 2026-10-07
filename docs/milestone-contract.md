@@ -12,6 +12,8 @@ The [permanent deletion slice](deletion-contract.md), added on 2026-10-07, advan
 
 The [document snapshot slice](snapshot-contract.md), added on the same date, advances database schema to 6. Binary snapshots commit before covered updates are pruned; loading applies snapshot plus tail. Receipts retain independent original repair bytes and do not expire with the update tail. The original milestone's no-compaction behavior below is historical.
 
+The [binary recovery-import slice](recovery-contract.md) advances database schema to 7 for retry-safe private-copy initialization. Original-note imports retain the existing journal/receipt path; document schema 2 and protocol 2 are unchanged.
+
 ## Document
 
 One Y.Doc per page. `title` is a Y.XmlFragment containing exactly one paragraph, with plain text. `body` is a Y.XmlFragment containing paragraphs and headings (levels 1–3), with plain text and a stable `id` attribute per block. No marks or extra blocks. The server initializes both fragments exactly once in a transaction. Browsers never seed an empty page. The editor mounts only after a persisted cache or server state is hydrated. Tiptap Collaboration supplies CRDT-aware local undo; UniqueID handles local split/paste, filtering remote transactions.

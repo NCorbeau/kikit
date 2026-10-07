@@ -6,6 +6,10 @@ import {
   PROTOCOL_VERSION,
   decodeUpdate,
   encodeUpdate,
+  MAX_UPDATE_BYTES,
+  parseRecoveryFile,
+  validateRecoveryState,
+  validateRepairableDocument,
   type ClientMessage,
   type ServerMessage,
 } from '@kikit/contracts';
@@ -36,6 +40,7 @@ export interface DocumentSession {
   getSnapshot(): SessionSnapshot;
   retry(): void;
   exportRecovery(): string;
+  importRecovery(file: string, committedState: Uint8Array): Promise<void>;
   pause(): Promise<void>;
   destroy(): void;
 }
@@ -422,7 +427,8 @@ class Session implements DocumentSession {
     const pendingBatches = [...this.pendingBatches.values(), ...unpersistedBatches];
     return JSON.stringify({
       format: 'kikit-recovery',
-      formatVersion: 1,
+      formatVersion: 2,
+      protocolVersion: PROTOCOL_VERSION,
       schemaVersion: DOCUMENT_SCHEMA_VERSION,
       accountId: this.identity.accountId,
       pageId: this.identity.pageId,
@@ -438,6 +444,79 @@ class Session implements DocumentSession {
         update: encodeUpdate(record.update),
       })),
     }, null, 2);
+  }
+
+  async importRecovery(file: string, committedState: Uint8Array): Promise<void> {
+    const recovery = parseRecoveryFile(file, this.identity);
+    validateRecoveryState(committedState);
+    if (!this.snapshot.ready || this.destroyed || this.incompatibleCache.length) {
+      throw new Error('Open the original note before merging recovery. Keep the file.');
+    }
+    await this.pause();
+    const candidate = new Y.Doc({ gc: false });
+    const server = new Y.Doc({ gc: false });
+    const prerequisiteCheck = new Y.Doc({ gc: false });
+    try {
+      if (this.queuedWrites.length || this.appendError || this.receiptError) {
+        throw new Error('Save or download the current draft before importing recovery.');
+      }
+      const stagedJournal = await this.store.load();
+      if (this.destroyed) return;
+      Y.applyUpdate(candidate, Y.encodeStateAsUpdate(this.doc));
+      for (const record of stagedJournal.updates) Y.applyUpdate(candidate, record.update);
+      for (const record of recovery.pending) Y.applyUpdate(candidate, record.update);
+      Y.applyUpdate(candidate, recovery.update);
+      validateRepairableDocument(candidate);
+      Y.applyUpdate(server, committedState);
+      const committedVector = Y.encodeStateVector(server);
+      // Test the actual outbound order. A final converged state alone can hide
+      // an earlier batch whose parent appears later, or was already acknowledged
+      // on this device but disappeared from restored server storage.
+      const known = new Set(stagedJournal.updates.map(record => record.id.toLowerCase()));
+      const replay = [...stagedJournal.updates.filter(record => record.pending),
+        ...recovery.pending.filter(record => !known.has(record.batchId.toLowerCase()))];
+      let ordered = true;
+      for (const record of replay) {
+        Y.applyUpdate(server, record.update);
+        if (server.store.pendingStructs || server.store.pendingDs) ordered = false;
+        else {
+          try { validateRepairableDocument(server); } catch { ordered = false; }
+        }
+      }
+      const before = Y.encodeStateAsUpdate(server);
+      Y.applyUpdate(server, Y.encodeStateAsUpdate(candidate));
+      const after = Y.encodeStateAsUpdate(server);
+      const unchanged = before.length === after.length && before.every((byte, index) => byte === after[index]);
+      // Include uncommitted parents when missing history exists. This first
+      // batch must be independently applicable to actual committed storage.
+      const missing = unchanged && ordered ? new Uint8Array([0, 0]) : Y.diffUpdate(after, committedVector);
+      if (missing.byteLength > MAX_UPDATE_BYTES) {
+        throw new Error('This recovery is too large to merge in one batch. Recover it as a new private copy.');
+      }
+      const records = recovery.pending.map(record => ({ id: record.batchId, update: record.update, pending: true }));
+      let prerequisite: StoredUpdate | undefined;
+      if (missing.length > 2) {
+        Y.applyUpdate(prerequisiteCheck, committedState);
+        Y.applyUpdate(prerequisiteCheck, missing);
+        if (prerequisiteCheck.store.pendingStructs || prerequisiteCheck.store.pendingDs) {
+          throw new Error('This recovery needs missing dependencies. Keep the file and recover a new private copy.');
+        }
+        validateRepairableDocument(prerequisiteCheck);
+        prerequisite = { id: crypto.randomUUID(), update: missing, pending: true };
+      }
+      const journal = await this.store.importUpdates(records, prerequisite, stagedJournal);
+      if (this.destroyed) return; // The committed journal remains recoverable after navigation.
+      Y.applyUpdate(this.doc, recovery.update, REMOTE_UPDATE_ORIGIN);
+      for (const record of journal) Y.applyUpdate(this.doc, record.update, REMOTE_UPDATE_ORIGIN);
+      this.pendingBatches.clear();
+      for (const record of journal) if (record.pending) this.pendingBatches.set(record.id, record);
+      this.publish();
+    } finally {
+      candidate.destroy();
+      server.destroy();
+      prerequisiteCheck.destroy();
+      this.retry();
+    }
   }
 
   async pause(): Promise<void> {

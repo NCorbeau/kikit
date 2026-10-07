@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Workspace } from './client';
 import { authClient, newPage } from './client';
+import { RecoveryImport } from '../recovery/RecoveryImport';
 import { AppHeader } from '../components/AppHeader';
 
 export function Notes({ workspace, onOpen, onChanged, onSignedOut }: {
@@ -36,7 +37,9 @@ export function Notes({ workspace, onOpen, onChanged, onSignedOut }: {
   }
   return <div className="app-shell"><AppHeader menuFooter={
     <button type="button" disabled={busy || !online} onClick={() => { void signOut(); }}>Sign out</button>
-  }>{null}</AppHeader>
+  }><RecoveryImport accountId={workspace.account!.accountId} disabled={busy} onRecovered={note => {
+    onChanged({ ...workspace, pages: [...workspace.pages.filter(page => page.id !== note.id), note] }); onOpen(note.id);
+  }} /></AppHeader>
     <main className="account-panel notes-panel">
       <div className="notes-heading"><h1>Your notes</h1><button type="button" className="primary-button" disabled={busy || !online} onClick={() => { void create(); }}>{busy ? 'Please wait…' : 'New note'}</button></div>
       <p className="account-email">{workspace.account?.email}</p>

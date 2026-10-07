@@ -1,3 +1,5 @@
+import type { PageSummary } from '@kikit/contracts';
+import { RecoveryImport } from '../recovery/RecoveryImport';
 import type { Workspace } from './client';
 import type { AppRoute } from '../sharing/routes';
 import { useDocumentSession } from '../session/useDocumentSession';
@@ -19,6 +21,7 @@ interface WorkspaceEditorProps {
   onNotes(): void;
   onSignedOut(): void;
   onReplace(workspace: Workspace): void;
+  onRecovered(page: PageSummary): void;
 }
 
 export function WorkspaceEditor(props: WorkspaceEditorProps) {
@@ -64,6 +67,10 @@ export function WorkspaceEditor(props: WorkspaceEditorProps) {
         actionsDisabled={exit.busy}
         onSignOut={signOut}
         shareAction={isOwner && <ShareControls pageId={pageId} accountId={account.accountId} disabled={sharingDisabled} />}
+        importAction={<RecoveryImport accountId={account.accountId} pageId={pageId} session={session}
+          disabled={exit.busy || exit.intent !== null} onRecovered={page => {
+            props.onRecovered(page); void exit.requestLeave({ kind: 'navigate', route: { kind: 'page', pageId: page.id } });
+          }} />}
         deleteAction={isOwner && (
           <button type="button" disabled={exit.busy || exit.intent !== null || snapshot.connection === 'offline' || !snapshot.ready}
             onClick={() => { void exit.requestLeave({ kind: 'delete' }); }}>
