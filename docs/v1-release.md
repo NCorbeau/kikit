@@ -17,7 +17,7 @@ The existing editor, private accounts and signed-in sharing remain the baseline.
 | Hosted backups and isolated restoration | [MAC-102](https://linear.app/mglownia/issue/MAC-102) | Open; targets remain unverified |
 | Binary recovery import | [MAC-103](https://linear.app/mglownia/issue/MAC-103) | Required; open |
 | Document snapshots and safe compaction | [MAC-153](https://linear.app/mglownia/issue/MAC-153) | Implemented locally with passing PostgreSQL/browser/restore checks; review/CI and hosted rollout remain |
-| Stylesheet organization/refactor | [MAC-112](https://linear.app/mglownia/issue/MAC-112) | Required; open |
+| Stylesheet organization/refactor | [MAC-112](https://linear.app/mglownia/issue/MAC-112) | Implemented locally: identical production CSS, passing focused browser/visual/focus checks; review/CI remain |
 | Browser/native input/accessibility | [MAC-104](https://linear.app/mglownia/issue/MAC-104) | Supported platforms and full evidence remain open |
 | Hard crashes, partitions, overload and slow recipients | [MAC-105](https://linear.app/mglownia/issue/MAC-105) | Open beyond previously recorded failure checks |
 | Performance under stated conditions | [MAC-106](https://linear.app/mglownia/issue/MAC-106) | Open; no measured capacity claim |

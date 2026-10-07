@@ -601,7 +601,9 @@ test('flat task lists support shortcuts, keyboard checks, split/merge, conversio
   const { page } = await openPage(browser);
   const body = page.getByRole('textbox', { name: 'Page body', exact: true });
   const items = body.locator('li[data-type="taskItem"]');
-  await body.fill('');
+  await body.focus();
+  await body.press('ControlOrMeta+a');
+  await body.press('Backspace');
   await body.pressSequentially('[ ] ');
   await page.keyboard.insertText('First task');
   await expect(items).toHaveCount(1);
