@@ -156,4 +156,3 @@ The [GitHub Actions workflow](../.github/workflows/quality.yml) runs code qualit
 The next release gates are hosted renewal/expiry and tested hosted backups before valuable notes. Page deletion, recovery import, and snapshot compaction remain separate release work for this application source. Hosted sharing is verified under the recorded Chromium conditions; broader failure/browser/accessibility evidence and performance remain separate work. This does not establish complete v1 readiness.
 
 The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, with scheduled backups deferred for disposable test notes. Tested backups and restoration are required before valuable notes. The sharing rollout retained one application instance and the existing private-network PostgreSQL service. See [deployment](deployment.md) for rollout and recovery limits.
-
