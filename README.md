@@ -17,7 +17,7 @@ Two signed-in collaborators, separate browser storage, and the real local backen
 - Use light or dark mode, keyboard shortcuts, and collaborative undo.
 - Check device and server save status, retry failed saves, or export a recovery file.
 
-Kikit is under active development. Accounts and sharing are available in the hosted app; the recording shows the updated UI in a local preview. Hosted backups/restore and session renewal/expiry still need verification before v1. See the [verification record](docs/verification.md) for tested behavior and remaining limits.
+Kikit is under active development. The hosted app runs the task-list build `d9de585` with database schema 4. The recording shows newer local source; deletion, binary recovery import and snapshot compaction require database schema 7 and a matching rollout. Hosted backups/restore, session renewal/expiry and supported-platform checks remain before v1. See the [release checklist](docs/v1-release.md) and [verification record](docs/verification.md) for evidence and remaining limits.
 
 ## Run locally
 
@@ -40,10 +40,11 @@ The editor uses **React, TypeScript, and Tiptap**, with **Yjs** for collaborativ
 
 “Saved on this device” means local storage has committed the edit. “Saved to server” means the server has committed it and returned a durable receipt. Retries keep the same batch identity so a lost acknowledgement does not save the edit twice.
 
-- [Editor, synchronization, and persistence](docs/milestone-contract.md)
+- [Architecture and edit flow](docs/architecture.md) · [Editor, synchronization, and persistence](docs/milestone-contract.md)
 - [Accounts and offline recovery](docs/accounts-contract.md)
 - [Sharing and access controls](docs/shared-pages-contract.md)
-- [To-do lists](docs/task-lists-contract.md)
+- [To-do lists](docs/task-lists-contract.md) · [Recovery files](docs/recovery-contract.md)
+- [Input and accessibility checks](docs/accessibility.md) · [Local performance measurements](docs/performance.md)
 - [Tests and verification evidence](docs/verification.md) · [CI](docs/ci.md)
 
 ## License

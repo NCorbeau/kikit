@@ -2,6 +2,8 @@
 
 Local setup, implementation details, and verification commands for contributors. For a quick introduction, see the [README](../README.md). Dated checks and rollout history live in [verification](verification.md).
 
+Source checkpoint: 2026-10-07. This local source requires document schema 2, database schema 7 and wire protocol 2. The recorded hosted build remains `d9de585`, with database schema 4; current deletion, compaction and recovery changes need a matching migration/rollout. Local checks and the authenticated demonstration do not establish hosted v1 readiness. See the [release checklist](v1-release.md).
+
 ## Run locally
 
 Requirements: Node.js 24+, pnpm 12.5.1, Docker with Compose, and a current Chromium-based browser. No cloud services or paid infrastructure are needed.
@@ -40,7 +42,7 @@ The production server serves the built web app, authentication HTTP routes, and 
 
 Use [the deployment guide](deployment.md) for Railway settings, separate database roles, email sender verification, and restore checks. [.env.example](../.env.example) lists required variables using placeholders; export them or configure provider secrets. The server does not load environment files automatically. Do not enable `KIKIT_DEV_FIXTURE` on Railway.
 
-After the [one-time deployment command setup](deployment.md#one-command-updates), commit your changes and run `pnpm run deploy`. It stops the old app, applies pending migrations in a separate one-shot service, deploys the same committed snapshot, and checks public health. `pnpm run deploy --dry-run` prints the plan without remote actions. The first hosted run applied migrations but stalled on a Railway job-status assumption; its app rollout was finished manually. Use the follow-up status correction once merged; see the dated verification record.
+After the [one-time deployment command setup](deployment.md#one-command-updates), commit your changes and run `pnpm run deploy`. It stops the old app, applies pending migrations in a separate one-shot service, deploys the same committed snapshot, and checks public health. `pnpm run deploy --dry-run` prints the plan without remote actions. The first hosted run applied migrations but stalled on a Railway job-status assumption; its app rollout was finished manually. The follow-up status correction is merged through PR #17; a complete automated stop/migrate/start run with that correction remains unproved. See the dated verification record.
 
 The [account contract](accounts-contract.md) describes cookies, authorization, offline account hints, and recovery. Email delivery is substituted only inside the automated test harness; there is no public test-login or magic-link discovery endpoint.
 
@@ -67,13 +69,21 @@ Owners can create an invitation from **Share**, copy its link or show its QR cod
 
 Links are shown only when generated because the server stores hashes. Later visits offer an explicit replacement. Invitations remain active until disabled/replaced. Login continuation stays in the initiating tab; if email opens elsewhere, reopen the invitation after signing in. Revoked access hides the editor while retaining drafts and binary recovery export. See [the sharing contract](shared-pages-contract.md).
 
-Authorized collaborators appear above the document with colored cursors and selections in the title and body. Presence is transient: it does not create document updates, receipts, or save acknowledgements. Disconnecting, signing out, or removing membership clears it. Sharing uses database schema 3 and wire protocol 2; matching web/server versions must be deployed together.
+Authorized collaborators appear above the document with colored cursors and selections in the title and body. Presence is transient: it does not create document updates, receipts, or save acknowledgements. Disconnecting, signing out, or removing membership clears it. The sharing slice first required database schema 3 and wire protocol 2; the current source requires database schema 7. Matching web/server versions must be deployed together.
 
 ## To-do lists
 
 Choose **To-do list** in the formatting controls, or type `[ ] ` at the start of a paragraph. `[x] ` creates a completed item. Enter adds an unchecked item; Enter on an empty item returns to ordinary text. **Text** or a heading control converts the selected items back to ordinary blocks. Checkboxes can be focused with Tab and toggled with Space. Completed items stay in place. Lists support the same local persistence, offline recovery, synchronization and collaborative undo as text.
 
-This source adds document schema 2 and database schema 4 while retaining wire protocol 2. Existing notes and pending browser journals are upgraded without replacing binary history or batch identities. It requires a matching web/server rollout and the new migration; the 2026-10-05 Railway rollout applied these versions; hosted checklist interaction/sync remains unverified. See [the task-list contract](task-lists-contract.md).
+The task-list slice adds document schema 2 and database schema 4 while retaining wire protocol 2. Existing notes and pending browser journals are upgraded without replacing binary history or batch identities. The 2026-10-05 Railway rollout applied these versions; hosted checklist interaction/sync remains unverified. This source now requires database schema 7 for note deletion, document compaction and recovery-copy initialization; it is not deployed. See [the task-list contract](task-lists-contract.md), [deletion contract](deletion-contract.md), [snapshot contract](snapshot-contract.md) and [recovery contract](recovery-contract.md).
+
+## Deleting notes
+
+Owners can choose **Delete note** in the note menu and confirm permanent deletion for everyone. There is no Trash or undo. Shared access and invitations end; delayed create retries cannot recreate the note. Local drafts remain recoverable. If device saving fails, download recovery before confirming deletion. See [the deletion and recovery policy](data-policy.md).
+
+## Recovery files
+
+Choose **Import recovery file** in the app or note menu. With the exporting account signed in, merge into the open original note while still authorized, or recover a new private copy. Original-note merge reads fresh locked committed state online and the canonical account/page journal, then validates every actual outbound prefix while excluding source IDs already acknowledged locally. Missing history is journaled before every existing/imported pending batch, including after an older server restore. The import transaction verifies the staged journal’s ordered IDs, bytes and pending markers; a concurrent-tab append or acknowledgement rejects before mutation and permits retry. Existing edits, pending identities and the original file are retained; failed imports offer an actionable error. Large or unresolved prerequisites require a private copy under the existing wire limits; recovered writes still use the ordinary WebSocket/receipt path. See [the recovery contract](recovery-contract.md).
 
 ## Development identity boundary
 
@@ -89,10 +99,12 @@ Fixture page access is checked separately through PostgreSQL grants on handshake
 | `apps/web/src/session/useDocumentSession.ts` | Stable React session ownership, subscription, and cleanup |
 | `apps/web/src/session/useRecoveryDownload.ts` | Recovery file download and actionable download errors |
 | `apps/web/src/theme.ts` and `theme.css` | System/user appearance preference and shared light/dark color tokens |
+| `apps/web/src/styles.css` and `styles/` | Ordered style imports and focused shell/editor/account/collaboration rules; see [style organization](styles.md) |
 | `apps/web/src/editor` | Tiptap/ProseMirror schema, Yjs bindings, keyboard behavior, block IDs, participant cursor plugins and caret geometry |
 | `apps/web/src/session/local-store.ts` | Typed `idb` transactions for account/page history and the durable outbound journal |
 | `apps/web/src/session/index.ts` | Hydration, local persistence, pending batches, truthful state and recovery |
 | `apps/web/src/account` | Account lifetime, sign-in, note list and workspace composition; `useWorkspaceExit` owns guarded departure/recovery, with focused leave/recovery views |
+| `apps/web/src/recovery` | Account-bound file selection, committed-state reads and private-copy requests |
 | `apps/web/src/sharing` | Explicit join routes and account-bound requests; dialog-scoped invitation/mutation state, confirmation copy and modal focus handling |
 | `apps/web/src/session/sync-client.ts` | Authorized page handshake, WebSocket transport, ordered messages and reconnection |
 | `apps/server/src/app.ts` | Same-origin server wiring, static assets, connection admission and shutdown |
@@ -105,11 +117,13 @@ Fixture page access is checked separately through PostgreSQL grants on handshake
 | `apps/server/src/presence.ts` | Transient frame validation, authenticated identity, client-ID ownership, rate bounds and awareness lifetime |
 | `apps/server/src/queue.ts` | Bounded per-page sequencing and shutdown admission |
 | `apps/server/src/persistence.ts` | Page access locks, document loading, transactions and receipts |
+| `apps/server/src/document-storage.ts` and `document-snapshots.ts` | Consistent snapshot/tail hydration and committed snapshot-before-prune maintenance |
+| `apps/server/src/recovery-route.ts` | Locked committed binary reads and retry-safe new private-copy initialization |
 | `apps/server/src/schema.ts` | Drizzle table definitions and binary column types |
 | `apps/server/migrations` | Reviewed SQL migration files and generated metadata |
 | `apps/server/src/migrations.ts` | Migration lock, history verification, and Drizzle runner |
 | `apps/server/src/development-seed.ts` | Explicit development-only, idempotent page seed |
-| `packages/contracts` | Versioned wire messages, constants and binary encoding |
+| `packages/contracts` | Versioned wire messages, constants, binary encoding and shared document/recovery validation |
 
 1. The editor changes its Y.Doc immediately.
 2. IndexedDB atomically records the update and pending identity in insertion order.
@@ -119,6 +133,8 @@ Fixture page access is checked separately through PostgreSQL grants on handshake
 6. The client marks that journal record acknowledged, retaining its document bytes. Lost acknowledgements retry the same identity and bytes.
 
 Reconnect uses a full committed Yjs state handshake. It does not clear pending batches. A reused batch identity with different bytes is rejected. If concurrent deletions remove every body block, the server commits one empty paragraph with the edit and returns that same repair on retries. Any uncertain database commit or room-application failure invalidates the room; connected clients reload committed state and resolve pending outcomes through receipts. No separate REST content-save path exists.
+
+See [the architecture diagrams](architecture.md) for trust boundaries, the two durability boundaries and offline recovery.
 
 See [the concrete protocol and persistence contract](milestone-contract.md) and [verification evidence](verification.md). [AGENTS.md](../AGENTS.md) records project-wide invariants and scope.
 
@@ -147,12 +163,12 @@ The [GitHub Actions workflow](../.github/workflows/quality.yml) runs code qualit
 
 - One active account server, private notes and authenticated shared pages. PostgreSQL does not coordinate in-memory rooms across replicas. An ownership lock rejects a second account server; deployments require stopping and draining the old instance first.
 - Plain text paragraphs/headings and flat checkbox lists: no marks, nested lists, due dates, reminders, attachments, comments, drag reordering, or advanced blocks.
-- Full-state handshakes and retained binary update histories; no snapshot compaction/pruning. Updates are limited to 256 KiB and committed documents to 2 MiB. These are guardrails, not measured capacity claims.
+- Full-state handshakes and binary snapshots with a retained committed tail; covered update rows are pruned only after snapshot commit. Independent receipts preserve retries and original server repairs. Compaction runs after 100 updates or 1 MiB of additional tail. Updates are limited to 256 KiB and encoded documents/snapshots to 2 MiB. A history-heavy oversized snapshot leaves source updates intact and records a maintenance failure. These are guardrails, not measured capacity claims.
 - Queues admit at most 64 operations/8 MiB per page and 256 operations/32 MiB globally, including running work. At most 128 sockets; each socket has a 4 MiB outbound budget. Overload leaves uncommitted edits pending.
 - PostgreSQL applies 5-second statement, 2-second lock, and 15-second transaction limits. Queue ownership stays with an operation until completion/rollback. Shutdown stops admission, rejects queued work, and waits for active operations; a network blackhole can still delay shutdown. No deployment deadline or production availability target is claimed.
-- Binary recovery export has no import UI yet. The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; backups and hosted restoration remain deferred until before valuable notes. No performance capacity study, full screen-reader audit, or native IME/browser compatibility matrix has been completed.
+- Binary recovery export/import, compaction and stylesheet organization are implemented locally. See [recovery import](recovery-contract.md), [local measurements](performance.md) and [input/accessibility conditions](accessibility.md). The local backup/restore and restricted-role drill is automated. Hosted runtime privileges are verified; scheduled backups and hosted restoration remain open. Capacity, physical mobile input, OS IME and screen-reader support are not established by the local Chromium checks.
 - The Docker image serves the production bundle. Hosted private-account and two-account sharing checks have dated evidence; natural session renewal/expiry remains unverified. The editor bundle produces Vite's large-chunk advisory.
 
-The next release gates are hosted renewal/expiry and tested hosted backups before valuable notes. Page deletion, recovery import, and snapshot compaction remain separate release work for this application source. Hosted sharing is verified under the recorded Chromium conditions; broader failure/browser/accessibility evidence and performance remain separate work. This does not establish complete v1 readiness.
+The [v1 release checklist](v1-release.md) tracks final source review/CI, matching rollout and hosted feature checks, natural renewal/expiry, tested hosted backups, and supported-platform evidence. Deletion, binary recovery import, snapshot compaction and stylesheet organization are implemented locally. Local hard-crash/response-loss/socket-pressure evidence and bounded performance measurements have recorded conditions; neither establishes hosted behavior or capacity. The [authenticated demonstration](demos/README.md) shows newer local source with two distinct accounts; the published clip joins before capture, while a checked local supplement shows the explicit join on screen. External email is substituted in both harnesses. Hosted sharing has separate dated Chromium evidence. Complete v1 readiness remains open.
 
-The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free, with scheduled backups deferred for disposable test notes. Tested backups and restoration are required before valuable notes. The sharing rollout retained one application instance and the existing private-network PostgreSQL service. See [deployment](deployment.md) for rollout and recovery limits.
+The selected initial setup is Railway Hobby in Amsterdam, a $5/month Kikit target before tax and an authorized $20 workspace compute limit, Resend Free. Daily backups with six-day retention, up to 24 hours of server-data loss and restoration within four hours after recovery starts are accepted targets to configure and test; cost review precedes paid resources. Tested hosted backups and restoration are required before valuable notes. The sharing rollout retained one application instance and the existing private-network PostgreSQL service. See [deployment](deployment.md) and the [hosted recovery plan](hosted-recovery-plan.md) for rollout, cost review and isolated-drill boundaries.
