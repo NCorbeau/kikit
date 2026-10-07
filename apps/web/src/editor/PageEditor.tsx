@@ -4,10 +4,12 @@ import type { Doc } from 'yjs';
 import type { Awareness } from 'y-protocols/awareness';
 import { FormattingToolbar } from './FormattingToolbar';
 import { bodyEditorOptions, titleEditorOptions } from './page-editor-setup';
+import { useFormattingFocus } from './useFormattingFocus';
 
 export function PageEditor({ doc, awareness, editable }: { doc: Doc; awareness: Awareness; editable: boolean }) {
   const body = useEditor(bodyEditorOptions(doc, awareness, editable), [doc]);
   const title = useEditor(titleEditorOptions(doc, awareness, body, editable), [doc, body]);
+  const formattingFocus = useFormattingFocus(body);
 
   useLayoutEffect(() => {
     body?.setEditable(editable);
@@ -35,8 +37,9 @@ export function PageEditor({ doc, awareness, editable }: { doc: Doc; awareness: 
   return (
     <>
       <div className="page-title"><EditorContent editor={title} /></div>
-      <FormattingToolbar editor={body} editable={editable} selection={selection} />
-      <EditorContent editor={body} className="page-body" />
+      <FormattingToolbar editor={body} editable={editable} selection={selection} focus={formattingFocus} />
+      <EditorContent editor={body} className="page-body"
+        onFocusCapture={formattingFocus.focus} onBlurCapture={formattingFocus.blur} />
     </>
   );
 }

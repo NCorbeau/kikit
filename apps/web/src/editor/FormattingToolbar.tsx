@@ -1,6 +1,7 @@
 import type { Editor } from '@tiptap/react';
 import { UndoIcon } from '../components/Icons';
 import { setTextBlock } from './formatting-commands';
+import type { useFormattingFocus } from './useFormattingFocus';
 
 export interface FormattingSelection {
   paragraph: boolean;
@@ -10,13 +11,15 @@ export interface FormattingSelection {
   redo: boolean;
 }
 
-export function FormattingToolbar({ editor, editable, selection }: {
+export function FormattingToolbar({ editor, editable, selection, focus }: {
   editor: Editor | null;
   editable: boolean;
   selection: FormattingSelection | null;
+  focus: ReturnType<typeof useFormattingFocus>;
 }) {
   return (
-    <div className="format-bar" role="group" aria-label="Text formatting">
+    <div ref={focus.toolbar} className="format-bar" role="group" aria-label="Text formatting"
+      data-writing-focus={focus.writingFocused || undefined} onFocusCapture={focus.focus} onBlurCapture={focus.blur}>
       <div className="format-group">
         <button
           type="button" className="format-button paragraph-button" aria-label="Paragraph"
