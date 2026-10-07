@@ -28,7 +28,8 @@ export async function deletePage(pool: pg.Pool, pageId: string, principal: Princ
       await db.delete(pageGrants).where(eq(pageGrants.pageId, pageId));
       // Reserve the page identity without retaining note text or binary content.
       // A delayed POST /pages retry must never initialize this page again.
-      await db.update(pages).set({ title: '', initialState: Buffer.alloc(0), deletedAt: new Date() })
+      await db.update(pages).set({ title: '', initialState: Buffer.alloc(0), snapshotState: null,
+        snapshotSequence: 0, deletedAt: new Date() })
         .where(eq(pages.id, pageId));
     }
     committing = true;

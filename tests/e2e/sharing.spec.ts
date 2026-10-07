@@ -1,6 +1,9 @@
 import { clickHeaderAction, openHeaderMenu } from './header-actions';
 import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import jsQR from 'jsqr';
+import { randomUUID } from 'node:crypto';
+import * as Y from 'yjs';
+import { commitUpdate, loadPage } from '../../apps/server/src/persistence';
 import {
   AccountBrowserHarness, accountOrigin, appendBody, createNote, downloadRecovery,
   pageBody, recoveryBody, serverSaved, expectDocumentContains, expectDocumentExcludes, type BrowserAccount,
@@ -517,4 +520,57 @@ test('owner deletion requires recovery of failed device writes and supports canc
   await remove.click();
   await expect(owner.page.getByRole('heading', { name: 'Your notes', exact: true })).toBeVisible();
   expect((await harness.pool.query('SELECT deleted_at FROM pages WHERE id=$1', [pageId])).rows[0].deleted_at).not.toBeNull();
+});
+
+test('authenticated clients retain lost acknowledgements and offline drafts across snapshot pruning and restart', async ({ browser }) => {
+  const owner = await account(browser); const member = await account(browser);
+  const pageId = await createNote(owner.page, 'Compaction recovery', 'Snapshot baseline.');
+  await owner.page.getByRole('button', { name: 'All notes', exact: true }).click();
+  await expect(owner.page.getByRole('heading', { name: 'Your notes', exact: true })).toBeVisible();
+  const sessionId = (await harness.pool.query('SELECT id FROM auth_session WHERE user_id=$1', [owner.identity.accountId])).rows[0].id as string;
+  // Seed a committed small history while no editor room is active. The threshold
+  // crossing, lost acknowledgement, offline draft and restart use the real UI.
+  const loaded = await loadPage(harness.pool, pageId, owner.identity.accountId, sessionId);
+  const text = (loaded.doc.getXmlFragment('body').get(0) as Y.XmlElement).get(0) as Y.XmlText;
+  const blockId = (loaded.doc.getXmlFragment('body').get(0) as Y.XmlElement).getAttribute('id');
+  for (let sequence = loaded.sequence; sequence < 98; sequence++) {
+    const vector = Y.encodeStateVector(loaded.doc); text.insert(text.length, 'x');
+    await commitUpdate(harness.pool, pageId, owner.identity.accountId, randomUUID(), Y.encodeStateAsUpdate(loaded.doc, vector), { sessionId });
+  }
+  loaded.doc.destroy();
+  await owner.page.getByRole('button', { name: 'Compaction recovery', exact: true }).click();
+  await serverSaved(owner.page);
+  const { token } = await createInvitation(owner.page); await closeSharing(owner.page);
+  await joinThroughUi(member.page, token);
+  await expect.poll(() => member.page.evaluate(() => document.documentElement.dataset.offlineReady)).toBe('true');
+  await member.context.setOffline(true);
+  await appendBody(member.page, ' Offline before snapshot.');
+  await expect(member.page.getByTestId('save-status')).toHaveText('Saved on this device');
+  const recovery = await downloadRecovery(member.page, 'Download recovery file');
+  expect(recovery.pending.length).toBeGreaterThan(0);
+  await appendBody(owner.page, ' Before compaction.'); await serverSaved(owner.page);
+  expect((await harness.pool.query('SELECT sequence FROM pages WHERE id=$1', [pageId])).rows[0].sequence).toBe('99');
+  await harness.server.inject({ method: 'POST', url: '/api/test/faults', payload: { dropNextAck: true } });
+  await appendBody(owner.page, ' Lost acknowledgement at compaction.'); await serverSaved(owner.page);
+  await expect.poll(async () => (await harness.pool.query('SELECT snapshot_sequence FROM pages WHERE id=$1', [pageId])).rows[0].snapshot_sequence).toBe('100');
+  await expect.poll(async () => (await harness.pool.query('SELECT count(*)::int AS count FROM document_updates WHERE page_id=$1', [pageId])).rows[0].count).toBe(0);
+  expect((await harness.pool.query('SELECT count(*)::int AS count FROM receipts WHERE page_id=$1 AND sequence=100', [pageId])).rows[0].count).toBe(1);
+  await appendBody(owner.page, ' New committed tail.'); await serverSaved(owner.page);
+  await harness.stop(); await harness.start();
+  await owner.page.reload(); await serverSaved(owner.page);
+  await member.page.reload();
+  await expectDocumentContains(pageBody(member.page), 'Offline before snapshot.');
+  await member.context.setOffline(false);
+  for (const page of [owner.page, member.page]) {
+    await serverSaved(page);
+    for (const value of ['Snapshot baseline.', 'Offline before snapshot.', 'Before compaction.', 'Lost acknowledgement at compaction.', 'New committed tail.']) {
+      await expectDocumentContains(pageBody(page), value);
+    }
+    await expect(pageBody(page).locator('p').first()).toHaveAttribute('data-id', String(blockId));
+  }
+  for (const pending of recovery.pending) {
+    expect((await harness.pool.query('SELECT count(*)::int AS count FROM receipts WHERE page_id=$1 AND batch_id=$2', [pageId, pending.batchId])).rows[0].count).toBe(1);
+  }
+  const state = (await harness.pool.query('SELECT sequence, snapshot_sequence FROM pages WHERE id=$1', [pageId])).rows[0];
+  expect(Number(state.sequence)).toBe(101 + recovery.pending.length); expect(state.snapshot_sequence).toBe('100');
 });

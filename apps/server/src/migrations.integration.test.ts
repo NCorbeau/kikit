@@ -11,6 +11,8 @@ import { createSeed } from './document.js';
 import { seedDevelopmentPage } from './development-seed.js';
 import { migrateDatabase } from './migrations.js';
 import { commitUpdate, loadPage } from './persistence.js';
+import { compactPage } from './document-snapshots.js';
+import { prepareCommittedUpdate } from './document-candidate.js';
 
 const databaseUrl = process.env.KIKIT_TEST_DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL('../migrations/', import.meta.url));
@@ -125,12 +127,42 @@ describe.skipIf(!databaseUrl)('SQL migrations on PostgreSQL', () => {
     expect((await pool.query('SELECT initial_state, schema_version, sequence FROM pages')).rows[0])
       .toEqual({ initial_state: initial, schema_version: DOCUMENT_SCHEMA_VERSION, sequence: '1' });
     expect((await pool.query('SELECT * FROM document_updates')).rows).toEqual(updates);
-    expect((await pool.query('SELECT * FROM receipts')).rows).toEqual(receipts);
+    expect((await pool.query('SELECT * FROM receipts')).rows).toEqual(receipts.map(row => ({ ...row, repair_payload: null })));
     const loaded = await loadPage(pool, DEV_PAGE_ID, DEV_ACCOUNT_ID);
     expect(Y.encodeStateAsUpdate(loaded.doc)).toEqual(Y.encodeStateAsUpdate(doc));
     expect(await commitUpdate(pool, DEV_PAGE_ID, DEV_ACCOUNT_ID, batchId, update)).toEqual({ sequence: 1, duplicate: true });
     loaded.doc.destroy();
     doc.destroy();
+  });
+
+  it('moves legacy server repairs into durable receipts before allowing update pruning', async () => {
+    const journalPath = join(temporaryFolder, 'meta/_journal.json');
+    const journal = JSON.parse(await readFile(journalPath, 'utf8'));
+    journal.entries = journal.entries.slice(0, 5);
+    await writeFile(journalPath, JSON.stringify(journal));
+    await migrateDatabase(pool, temporaryFolder);
+    const initial = Buffer.from(createSeed());
+    await pool.query('INSERT INTO pages (id, owner_id, schema_version, initial_state, sequence) VALUES ($1,$2,$3,$4,1)',
+      [DEV_PAGE_ID, DEV_ACCOUNT_ID, DOCUMENT_SCHEMA_VERSION, initial]);
+    await pool.query("INSERT INTO page_grants (page_id, account_id, role) VALUES ($1,$2,'owner')", [DEV_PAGE_ID, DEV_ACCOUNT_ID]);
+    const committed = new Y.Doc(); Y.applyUpdate(committed, initial);
+    const changed = new Y.Doc(); Y.applyUpdate(changed, initial);
+    const vector = Y.encodeStateVector(changed); changed.getXmlFragment('body').delete(0, 1);
+    const submitted = Y.encodeStateAsUpdate(changed, vector); changed.destroy();
+    const repaired = prepareCommittedUpdate(committed, submitted).repairedUpdate!; committed.destroy();
+    const batchId = randomUUID();
+    const hash = createHash('sha256').update(submitted).digest('hex');
+    await pool.query('INSERT INTO document_updates (page_id, sequence, payload) VALUES ($1,1,$2)', [DEV_PAGE_ID, Buffer.from(repaired)]);
+    await pool.query('INSERT INTO receipts (page_id, batch_id, payload_hash, sequence) VALUES ($1,$2,$3,1)', [DEV_PAGE_ID, batchId, hash]);
+    const original = (await pool.query('SELECT * FROM receipts')).rows[0];
+    await migrateDatabase(pool);
+    expect((await pool.query('SELECT * FROM receipts')).rows[0]).toEqual({ ...original, repair_payload: Buffer.from(repaired) });
+    await compactPage(pool, DEV_PAGE_ID, { accountId: DEV_ACCOUNT_ID });
+    expect((await pool.query('SELECT * FROM document_updates')).rowCount).toBe(0);
+    expect(await commitUpdate(pool, DEV_PAGE_ID, DEV_ACCOUNT_ID, batchId, submitted))
+      .toEqual({ sequence: 1, duplicate: true, committedUpdate: Buffer.from(repaired) });
+    const loaded = await loadPage(pool, DEV_PAGE_ID, DEV_ACCOUNT_ID);
+    expect(loaded.doc.getXmlFragment('body').length).toBe(1); loaded.doc.destroy();
   });
 
   it('applies a subsequent SQL file exactly once across concurrent runners', async () => {

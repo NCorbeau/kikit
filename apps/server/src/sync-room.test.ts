@@ -56,9 +56,9 @@ describe('page queue ownership during transient/control overload', () => {
       // Existing room joins discard their separately hydrated document.
       if (rooms.size) {
         const copy = new Y.Doc(); Y.applyUpdate(copy, seed);
-        return { doc: copy, sequence: 0 };
+        return { doc: copy, sequence: 0, snapshotSequence: 0, tailBytes: 0 };
       }
-      return { doc, sequence: 0 };
+      return { doc, sequence: 0, snapshotSequence: 0, tailBytes: 0 };
     });
     const author = client(); const peer = client();
     await rooms.join(pageId, author.socket, { accountId: 'owner', sessionId: 'owner-session', name: 'Owner' });

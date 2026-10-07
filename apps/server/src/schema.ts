@@ -48,6 +48,8 @@ export const pages = pgTable('pages', {
   schemaVersion: integer('schema_version').notNull(),
   sequence: bigint('sequence', { mode: 'number' }).notNull().default(0),
   initialState: bytea('initial_state').notNull(),
+  snapshotState: bytea('snapshot_state'),
+  snapshotSequence: bigint('snapshot_sequence', { mode: 'number' }).notNull().default(0),
   createdAt: createdAt(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, table => [index('pages_owner_idx').on(table.ownerId)]);
@@ -89,13 +91,9 @@ export const receipts = pgTable('receipts', {
   batchId: uuid('batch_id').notNull(),
   payloadHash: text('payload_hash').notNull(),
   sequence: bigint('sequence', { mode: 'number' }).notNull(),
+  repairPayload: bytea('repair_payload'),
   createdAt: createdAt(),
 }, table => [
   primaryKey({ name: 'receipts_pkey', columns: [table.pageId, table.batchId] }),
   foreignKey({ name: 'receipts_page_id_fkey', columns: [table.pageId], foreignColumns: [pages.id] }),
-  foreignKey({
-    name: 'receipts_page_id_sequence_fkey',
-    columns: [table.pageId, table.sequence],
-    foreignColumns: [documentUpdates.pageId, documentUpdates.sequence],
-  }),
 ]);
