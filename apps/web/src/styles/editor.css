@@ -1,0 +1,115 @@
+.writing-area {
+  width: min(720px, calc(100% - 2 * var(--page-gutter)));
+  margin: 72px auto 80px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+.page-title { margin-bottom: 4px; }
+.page-body { flex: 1; display: flex; }
+.tiptap {
+  outline: none;
+  overflow-wrap: anywhere;
+}
+.tiptap[contenteditable="false"] { cursor: default; }
+.title-editor {
+  font-size: clamp(32px, 4vw, 40px);
+  line-height: 1.25;
+  letter-spacing: -1.1px;
+  font-weight: 700;
+  min-height: 50px;
+}
+.title-editor p { margin: 0; }
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--placeholder);
+  pointer-events: none;
+  height: 0;
+}
+
+.format-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  height: 28px;
+  margin-bottom: 4px;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.writing-area:has(.page-body:focus-within) .format-bar,
+.format-bar:hover,
+.format-bar:focus-within { visibility: visible; opacity: 1; }
+.format-group {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+.format-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius);
+  min-width: 30px;
+  height: 28px;
+  padding: 0 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.format-button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+.format-button[aria-pressed="true"] {
+  background: var(--active);
+  color: var(--ink);
+}
+.paragraph-button {
+  gap: 5px;
+  padding: 0 8px;
+}
+.paragraph-symbol { font-size: 14px; }
+.heading-number {
+  font-size: 10px;
+  margin-top: 3px;
+}
+.toolbar-divider {
+  height: 16px;
+  width: 1px;
+  background: var(--line);
+}
+
+.body-editor {
+  flex: 1;
+  min-height: 300px;
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--ink);
+}
+.body-editor p { margin: 0 0 14px; }
+.body-editor h1, .body-editor h2, .body-editor h3 {
+  line-height: 1.35;
+  font-weight: 650;
+}
+.body-editor h1 {
+  font-size: 28px;
+  letter-spacing: -.6px;
+  margin: 30px 0 12px;
+}
+.body-editor h2 {
+  font-size: 23px;
+  letter-spacing: -.3px;
+  margin: 26px 0 10px;
+}
+.body-editor h3 {
+  font-size: 19px;
+  letter-spacing: -.1px;
+  margin: 22px 0 8px;
+}
+.body-editor > :first-child { margin-top: 0; }
+
