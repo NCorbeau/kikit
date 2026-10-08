@@ -453,3 +453,7 @@ Fresh checks ran in an isolated fix worktree based on PR #24 at `1ac90d8`, using
 All seven authenticated recovery browser scenarios passed against real Better Auth sessions and the backend/database. The new scenario allows a fresh HTTP committed-state read while blocking WebSocket reconnect, imports already committed content into a stale cache, and verifies it survives an offline reload without another server write. The existing suite also covers older-server recovery, exact receipts, concurrent edits, private copies, response loss and account replacement.
 
 No dependency, document/protocol/database version or hosted configuration changed. Standalone PostgreSQL integration, restore and unrelated browser suites were not repeated for this client fix. The production build still reports the existing large-chunk advisory. These results establish local behavior, not hosted deployment or recovery guarantees.
+
+### Recovery lifecycle quality pass
+
+The recovery dialog no longer pauses or retries the session during mount/cleanup. `Session.importRecovery` owns settling writes, pausing transport and resuming after import; opening or closing a file chooser does not restart synchronization. Native modal/focus behavior and stale-response invalidation remain in the dialog. Fresh typecheck, production build and all seven authenticated recovery browser scenarios passed after this cleanup on 2026-10-09.
