@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useLayoutEffect, useRef, useState } from 'react';
-import { parseRecoveryFile, type PageSummary } from '@kikit/contracts';
+import { MAX_RECOVERY_FILE_BYTES, parseRecoveryFile, type PageSummary } from '@kikit/contracts';
 import type { DocumentSession } from '../session';
 import { containDialogFocus } from '../components/dialog-focus';
 import { checkRecoveryAccess, recoverCopy } from './client';
@@ -42,7 +42,7 @@ function ImportDialog({ accountId, pageId, session, onClose, onRecovered }: {
     setFile(null); setError(null);
     if (!input) return;
     try {
-      if (input.size > 16 * 1024 * 1024) throw new Error('This recovery file is too large. Keep the original file.');
+      if (input.size > MAX_RECOVERY_FILE_BYTES) throw new Error('This recovery file is too large. Keep the original file.');
       const text = await input.text();
       const parsed = parseRecoveryFile(text, { accountId });
       if (current !== selection.current) return;
