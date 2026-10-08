@@ -7,12 +7,13 @@ import * as Y from 'yjs';
 import { decodeUpdate } from '@kikit/contracts';
 import { createServer } from '../../apps/server/src/app';
 import { migrateDatabase } from '../../apps/server/src/migrations';
+import { authenticateBrowser, type BrowserAccount } from '../support/browser-auth';
+export type { BrowserAccount } from '../support/browser-auth';
 export { expectDocumentText, expectDocumentContains, expectDocumentExcludes } from './document-assertions';
 
 export const accountDatabaseUrl = 'postgres://kikit:kikit_local_only@127.0.0.1:54329/kikit_e2e';
 export const accountOrigin = 'http://127.0.0.1:5198';
 
-export interface BrowserAccount { accountId: string; email: string; cookie: string }
 export interface RecoveryFile {
   accountId: string; pageId: string; update: string;
   pending: { batchId: string; update: string }[];
@@ -54,26 +55,8 @@ export class AccountBrowserHarness {
     this.emails.add(email);
     // Keep the real limiter enabled; each independent signup uses a separate local peer.
     const remoteAddress = `127.0.1.${++this.peer}`;
-    const sent = await this.server.inject({
-      method: 'POST', url: '/api/auth/sign-in/magic-link', remoteAddress,
-      headers: { origin: accountOrigin }, payload: { email, callbackURL: '/' },
-    });
-    expect(sent.statusCode).toBe(200);
-    const link = new URL(this.mail.get(email)!);
-    const redeemed = await this.server.inject({ url: link.pathname + link.search, remoteAddress });
-    expect(redeemed.statusCode).toBe(302);
-    const setCookie = redeemed.headers['set-cookie'];
-    const values = (Array.isArray(setCookie) ? setCookie : [setCookie]).filter(Boolean).map(String);
-    const cookie = values.map(value => value.split(';')[0]).join('; ');
-    await context.addCookies(values.map(value => {
-      const pair = value.split(';')[0]!;
-      const separator = pair.indexOf('=');
-      return { name: pair.slice(0, separator), value: pair.slice(separator + 1),
-        url: accountOrigin, httpOnly: true, sameSite: 'Lax' as const };
-    }));
-    const identity = await this.server.inject({ url: '/api/session', headers: { cookie } });
-    expect(identity.statusCode).toBe(200);
-    return { accountId: identity.json().accountId as string, email, cookie };
+    return authenticateBrowser({ server: this.server, context, origin: accountOrigin,
+      email, remoteAddress, getMagicLink: address => this.mail.get(address) });
   }
 
   async loginThroughUi(page: Page, email: string, destination = '/'): Promise<void> {

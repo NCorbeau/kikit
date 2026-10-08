@@ -13,6 +13,7 @@ import { createServer } from '../apps/server/src/app';
 import { createSeed, validateDocument } from '../apps/server/src/document';
 import { migrateDatabase } from '../apps/server/src/migrations';
 import { showSyncDetails } from '../tests/e2e/header-actions';
+import { authenticateBrowser, type BrowserAccount } from '../tests/support/browser-auth';
 
 const ROUNDS = 20;
 const WARMUP_ROUNDS = 3;
@@ -200,6 +201,117 @@ function xmlText(node: Y.XmlFragment | Y.XmlElement | Y.XmlText): string {
   }).join('');
 }
 
+async function waitSaved(pages: Page[]): Promise<void> {
+  await Promise.all(pages.map(page => expect(page.getByTestId('save-status')).toHaveText('Saved to server')));
+}
+
+/** Measure backlog replay independently of the paced online typing phase. */
+async function measureOfflineReplay({ pages, contexts, accounts, pool, pageId, cdpSessions, sampleOffset, expectedTextLength }: {
+  pages: Page[];
+  contexts: BrowserContext[];
+  accounts: Pick<BrowserAccount, 'accountId'>[];
+  pool: pg.Pool;
+  pageId: string;
+  cdpSessions: CDPSession[];
+  sampleOffset: number;
+  expectedTextLength: number;
+}) {
+  // The backlog is generated through actual editor input and its strict local
+  // journal commits. Keep identities/bytes in memory only for replay checks.
+  await Promise.all(contexts.map(context => context.setOffline(true)));
+  await Promise.all(pages.map(page => expect(page.getByTestId('connection-status')).toHaveText('Offline')));
+  for (let round = 0; round < OFFLINE_ROUNDS; round++) {
+    await Promise.all(pages.map(page => page.keyboard.insertText('o')));
+    await Promise.all(pages.map(page => expect.poll(() => page.evaluate(() =>
+      window.kikitPerf.samples.at(-1)?.localCommitMs !== undefined)).toBe(true)));
+  }
+  const backlog = await Promise.all(pages.map((page, index) => readJournal(page, accounts[index]!.accountId, pageId)));
+  const pending = backlog.map(records => records.filter(record => record.pending));
+  pending.forEach(records => assert.equal(records.length, OFFLINE_ROUNDS));
+  const originalBatches = pending.flat();
+  const originalIds = originalBatches.map(record => record.id);
+  const storedBefore = await pool.query('SELECT sequence FROM pages WHERE id=$1', [pageId]);
+  const sequenceBeforeReplay = Number(storedBefore.rows[0].sequence);
+  const priorReceipts = await pool.query('SELECT batch_id FROM receipts WHERE page_id=$1 AND batch_id=ANY($2::uuid[])', [pageId, originalIds]);
+  assert.equal(priorReceipts.rowCount, 0);
+  const offlineCaptures = await Promise.all(pages.map(page => page.evaluate(() => window.kikitPerf)));
+  for (const capture of offlineCaptures) {
+    const offlineSamples = capture.samples.slice(sampleOffset);
+    assert.equal(offlineSamples.length, OFFLINE_ROUNDS);
+    offlineSamples.forEach(sample => assert.equal(sample.durableAckMs, undefined));
+  }
+  const offlineBacklog = await memorySnapshot(cdpSessions);
+  const reconnectStart = performance.now();
+  const reconnectMarkers = await Promise.all(pages.map(async (page, index) => {
+    const marker = await page.evaluate(() => performance.now());
+    await contexts[index]!.setOffline(false);
+    return marker;
+  }));
+  await waitSaved(pages);
+  const allSavedWallMs = performance.now() - reconnectStart;
+  const replayed = await memorySnapshot(cdpSessions);
+  const restored = await Promise.all(pages.map((page, index) => readJournal(page, accounts[index]!.accountId, pageId)));
+  restored.forEach((records, index) => {
+    assert.equal(records.filter(record => record.pending).length, 0);
+    for (const original of pending[index]!) {
+      const committed = records.find(record => record.id === original.id);
+      assert(committed);
+      assert.equal(committed.pending, false);
+      assert.deepEqual(committed.bytes, original.bytes);
+    }
+  });
+  const receipts = await pool.query('SELECT batch_id,payload_hash,sequence FROM receipts WHERE page_id=$1 AND batch_id=ANY($2::uuid[])', [pageId, originalIds]);
+  assert.equal(receipts.rowCount, originalBatches.length);
+  assert.equal(new Set(receipts.rows.map(row => row.batch_id)).size, originalBatches.length);
+  for (const original of originalBatches) {
+    assert.equal(receipts.rows.find(row => row.batch_id === original.id)?.payload_hash,
+      createHash('sha256').update(Uint8Array.from(original.bytes)).digest('hex'));
+  }
+  const stored = await pool.query('SELECT initial_state,snapshot_state,snapshot_sequence,sequence FROM pages WHERE id=$1', [pageId]);
+  const persisted = stored.rows[0];
+  assert.equal(Number(persisted.sequence) - sequenceBeforeReplay, originalBatches.length);
+  const tail = await pool.query('SELECT payload FROM document_updates WHERE page_id=$1 AND sequence>$2 ORDER BY sequence', [pageId, persisted.snapshot_sequence]);
+  const persistedDoc = new Y.Doc();
+  try {
+    Y.applyUpdate(persistedDoc, persisted.snapshot_state ?? persisted.initial_state);
+    for (const update of tail.rows) Y.applyUpdate(persistedDoc, update.payload);
+    const texts = await Promise.all(pages.map(page => page.getByRole('textbox', { name: 'Page body', exact: true }).evaluate(element =>
+      (element as HTMLElement & { editor: { state: { doc: { textContent: string } } } }).editor.state.doc.textContent)));
+    texts.forEach(text => assert.equal(text, xmlText(persistedDoc.getXmlFragment(BODY_FRAGMENT))));
+    assert.equal(texts[0]!.length, expectedTextLength);
+  } finally { persistedDoc.destroy(); }
+  const replayCaptures = await Promise.all(pages.map(page => page.evaluate(() => window.kikitPerf)));
+  const replaySamples = replayCaptures.flatMap((capture, index) => capture.samples.slice(sampleOffset).map(sample => {
+    assert.equal(typeof sample.durableAckMs, 'number');
+    assert.equal(typeof sample.acknowledgementSavedMs, 'number');
+    assert(sample.acknowledgementSavedMs! >= sample.durableAckMs!, 'Replay receipt commit must follow its durable ACK');
+    return { localCommitMs: sample.localCommitMs!,
+      reconnectAckMs: sample.start + sample.durableAckMs! - reconnectMarkers[index]!,
+      reconnectStoredAckMs: sample.start + sample.acknowledgementSavedMs! - reconnectMarkers[index]! };
+  }));
+  assert(replaySamples.every(sample => sample.reconnectAckMs >= 0 && sample.reconnectStoredAckMs >= 0));
+  const metrics = ['localCommitMs', 'reconnectAckMs', 'reconnectStoredAckMs'] as const;
+  return {
+    memory: { offlineBacklog, replayed },
+    replay: {
+      pendingBatches: originalBatches.length,
+      pendingBytes: originalBatches.reduce((sum, record) => sum + record.bytes.length, 0),
+      offlineRoundsPerEditor: OFFLINE_ROUNDS,
+      allSavedWallMs,
+      statisticsMs: Object.fromEntries(metrics.map(metric =>
+        [metric, distribution(replaySamples.map(sample => sample[metric]))])),
+      checks: {
+        originalIdsAndBytesRetained: true,
+        oneMatchingReceiptPerBatch: true,
+        pendingClearedOnlyAfterAcknowledgement: true,
+        exactSequenceIncrease: true,
+        browserAndPostgresConvergence: true,
+      },
+      samples: replaySamples,
+    },
+  };
+}
+
 async function run() {
   const databaseName = `kikit_perf_${randomUUID().replaceAll('-', '')}`;
   const databaseUrl = new URL(LOCAL_ADMIN_URL);
@@ -231,24 +343,8 @@ async function run() {
     async function authenticate(context: BrowserContext) {
       const email = `${randomUUID()}@example.test`;
       const remoteAddress = `127.0.1.${++peer}`;
-      const signed = await server!.inject({ method: 'POST', url: '/api/auth/sign-in/magic-link', remoteAddress,
-        headers: { origin }, payload: { email, callbackURL: '/' } });
-      assert.equal(signed.statusCode, 200);
-      const link = new URL(mail.get(email)!);
-      const redeemed = await server!.inject({ url: link.pathname + link.search, remoteAddress });
-      assert.equal(redeemed.statusCode, 302);
-      const header = redeemed.headers['set-cookie'];
-      const values = (Array.isArray(header) ? header : [header]).filter(Boolean).map(String);
-      const cookie = values.map(value => value.split(';')[0]).join('; ');
-      await context.addCookies(values.map(value => {
-        const pair = value.split(';')[0]!;
-        const split = pair.indexOf('=');
-        return { name: pair.slice(0, split), value: pair.slice(split + 1), url: origin, httpOnly: true,
-          sameSite: 'Lax' as const };
-      }));
-      const identity = await server!.inject({ url: '/api/session', headers: { cookie }, remoteAddress });
-      assert.equal(identity.statusCode, 200);
-      return { cookie, accountId: identity.json().accountId as string };
+      return authenticateBrowser({ server: server!, context, origin, email, remoteAddress,
+        getMagicLink: address => mail.get(address) });
     }
     async function queueMetrics(): Promise<QueueSnapshot> {
       const response = await server!.inject('/api/test/metrics');
@@ -262,9 +358,6 @@ async function run() {
         return snapshot.pendingCount;
       }).toBe(0);
       return snapshot!;
-    }
-    async function waitSaved(pages: Page[]) {
-      await Promise.all(pages.map(page => expect(page.getByTestId('save-status')).toHaveText('Saved to server')));
     }
     for (const contentBytes of CONTENT_BYTES) for (const editors of [1, 2]) {
       measurementPhase = `${contentBytes / 1024} KiB / ${editors} editor scenario`;
@@ -328,80 +421,9 @@ async function run() {
         assert.equal(after.completed - before.completed, admitted, 'Idle queue boundaries must cover the same admitted/completed work');
         assert.equal(after.failures - before.failures, 0);
         assert.equal(after.rejected - before.rejected, 0);
-        // The backlog is generated through actual editor input and its strict local
-        // journal commits. Keep identities/bytes in memory only for replay checks.
-        await Promise.all(contexts.map(context => context.setOffline(true)));
-        await Promise.all(pages.map(page => expect(page.getByTestId('connection-status')).toHaveText('Offline')));
-        for (let round = 0; round < OFFLINE_ROUNDS; round++) {
-          await Promise.all(pages.map(page => page.keyboard.insertText('o')));
-          await Promise.all(pages.map(page => expect.poll(() => page.evaluate(() =>
-            window.kikitPerf.samples.at(-1)?.localCommitMs !== undefined)).toBe(true)));
-        }
-        const backlog = await Promise.all(pages.map((page, index) => readJournal(page, accounts[index]!.accountId, pageId)));
-        const pending = backlog.map(records => records.filter(record => record.pending));
-        pending.forEach(records => assert.equal(records.length, OFFLINE_ROUNDS));
-        const originalBatches = pending.flat();
-        const originalIds = originalBatches.map(record => record.id);
-        const storedBefore = await pool.query('SELECT sequence FROM pages WHERE id=$1', [pageId]);
-        const sequenceBeforeReplay = Number(storedBefore.rows[0].sequence);
-        const priorReceipts = await pool.query('SELECT batch_id FROM receipts WHERE page_id=$1 AND batch_id=ANY($2::uuid[])', [pageId, originalIds]);
-        assert.equal(priorReceipts.rowCount, 0);
-        const offlineCaptures = await Promise.all(pages.map(page => page.evaluate(() => window.kikitPerf)));
-        for (const capture of offlineCaptures) {
-          const offlineSamples = capture.samples.slice(WARMUP_ROUNDS + ROUNDS);
-          assert.equal(offlineSamples.length, OFFLINE_ROUNDS);
-          offlineSamples.forEach(sample => assert.equal(sample.durableAckMs, undefined));
-        }
-        const offlineBacklog = await memorySnapshot(cdpSessions);
-        const reconnectStart = performance.now();
-        const reconnectMarkers = await Promise.all(pages.map(async (page, index) => {
-          const marker = await page.evaluate(() => performance.now());
-          await contexts[index]!.setOffline(false);
-          return marker;
-        }));
-        await waitSaved(pages);
-        const allSavedWallMs = performance.now() - reconnectStart;
-        const replayed = await memorySnapshot(cdpSessions);
-        const restored = await Promise.all(pages.map((page, index) => readJournal(page, accounts[index]!.accountId, pageId)));
-        restored.forEach((records, index) => {
-          assert.equal(records.filter(record => record.pending).length, 0);
-          for (const original of pending[index]!) {
-            const committed = records.find(record => record.id === original.id);
-            assert(committed);
-            assert.equal(committed.pending, false);
-            assert.deepEqual(committed.bytes, original.bytes);
-          }
-        });
-        const receipts = await pool.query('SELECT batch_id,payload_hash,sequence FROM receipts WHERE page_id=$1 AND batch_id=ANY($2::uuid[])', [pageId, originalIds]);
-        assert.equal(receipts.rowCount, originalBatches.length);
-        assert.equal(new Set(receipts.rows.map(row => row.batch_id)).size, originalBatches.length);
-        for (const original of originalBatches) {
-          assert.equal(receipts.rows.find(row => row.batch_id === original.id)?.payload_hash,
-            createHash('sha256').update(Uint8Array.from(original.bytes)).digest('hex'));
-        }
-        const stored = await pool.query('SELECT initial_state,snapshot_state,snapshot_sequence,sequence FROM pages WHERE id=$1', [pageId]);
-        const persisted = stored.rows[0];
-        assert.equal(Number(persisted.sequence) - sequenceBeforeReplay, originalBatches.length);
-        const tail = await pool.query('SELECT payload FROM document_updates WHERE page_id=$1 AND sequence>$2 ORDER BY sequence', [pageId, persisted.snapshot_sequence]);
-        const persistedDoc = new Y.Doc();
-        try {
-          Y.applyUpdate(persistedDoc, persisted.snapshot_state ?? persisted.initial_state);
-          for (const update of tail.rows) Y.applyUpdate(persistedDoc, update.payload);
-          const texts = await Promise.all(pages.map(page => page.getByRole('textbox', { name: 'Page body', exact: true }).evaluate(element =>
-            (element as HTMLElement & { editor: { state: { doc: { textContent: string } } } }).editor.state.doc.textContent)));
-          texts.forEach(text => assert.equal(text, xmlText(persistedDoc.getXmlFragment(BODY_FRAGMENT))));
-          assert.equal(texts[0]!.length, contentBytes + (WARMUP_ROUNDS + ROUNDS + OFFLINE_ROUNDS) * editors);
-        } finally { persistedDoc.destroy(); }
-        const replayCaptures = await Promise.all(pages.map(page => page.evaluate(() => window.kikitPerf)));
-        const replaySamples = replayCaptures.flatMap((capture, index) => capture.samples.slice(WARMUP_ROUNDS + ROUNDS).map(sample => {
-          assert.equal(typeof sample.durableAckMs, 'number');
-          assert.equal(typeof sample.acknowledgementSavedMs, 'number');
-          assert(sample.acknowledgementSavedMs! >= sample.durableAckMs!, 'Replay receipt commit must follow its durable ACK');
-          return { localCommitMs: sample.localCommitMs!,
-            reconnectAckMs: sample.start + sample.durableAckMs! - reconnectMarkers[index]!,
-            reconnectStoredAckMs: sample.start + sample.acknowledgementSavedMs! - reconnectMarkers[index]! };
-        }));
-        assert(replaySamples.every(sample => sample.reconnectAckMs >= 0 && sample.reconnectStoredAckMs >= 0));
+        const offline = await measureOfflineReplay({ pages, contexts, accounts, pool, pageId, cdpSessions,
+          sampleOffset: WARMUP_ROUNDS + ROUNDS,
+          expectedTextLength: contentBytes + (WARMUP_ROUNDS + ROUNDS + OFFLINE_ROUNDS) * editors });
         await idleQueueMetrics();
         scenarios.push({ contentBytes, paragraphs: contentBytes / 1024, initialBinaryBytes: binary.byteLength, editors,
           editorReadyMs: captures.map(capture => capture.editorReadyMs), inputRounds: ROUNDS, statisticsMs: stats,
@@ -410,14 +432,9 @@ async function run() {
             meanProcessingMs: (after.processingMs - before.processingMs) / admitted,
             failures: after.failures - before.failures, rejected: after.rejected - before.rejected,
             snapshotAttempts: after.snapshots.attempted - before.snapshots.attempted }, samples,
-          memory: { beforeTyping, afterTyping, offlineBacklog, replayed },
-          replay: { pendingBatches: originalBatches.length, pendingBytes: originalBatches.reduce((sum, record) => sum + record.bytes.length, 0),
-            offlineRoundsPerEditor: OFFLINE_ROUNDS, allSavedWallMs,
-            statisticsMs: Object.fromEntries(['localCommitMs', 'reconnectAckMs', 'reconnectStoredAckMs'].map(metric =>
-              [metric, distribution(replaySamples.map(sample => sample[metric as keyof typeof sample]))])),
-            checks: { originalIdsAndBytesRetained: true, oneMatchingReceiptPerBatch: true, pendingClearedOnlyAfterAcknowledgement: true,
-              exactSequenceIncrease: true, browserAndPostgresConvergence: true }, samples: replaySamples } });
-        console.log(`Measured ${contentBytes / 1024} KiB / ${editors} editor(s), ${samples.length} paced inputs and ${originalBatches.length} verified offline replay batches.`);
+          memory: { beforeTyping, afterTyping, ...offline.memory },
+          replay: offline.replay });
+        console.log(`Measured ${contentBytes / 1024} KiB / ${editors} editor(s), ${samples.length} paced inputs and ${offline.replay.pendingBatches} verified offline replay batches.`);
       } finally { await Promise.all(contexts.map(context => context.close())); }
     }
     measurementPhase = 'production asset integrity check';
