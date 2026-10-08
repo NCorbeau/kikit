@@ -11,6 +11,7 @@ import { disableInvitation, findInvitationPage, joinInvitation, removeMember } f
 import { SyncRooms } from './sync-room.js';
 import { TestFaults } from './test-faults.js';
 import { deletePage } from './page-deletion.js';
+import { compactPage } from './document-snapshots.js';
 
 const databaseUrl = process.env.KIKIT_TEST_DATABASE_URL;
 interface Account { cookie: string; accountId: string; sessionId: string; email: string }
@@ -184,6 +185,7 @@ describe.skipIf(!databaseUrl)('shared pages with distinct authenticated accounts
     const bytes = edit(sync, 'Delete this committed content.'); const batchId = randomUUID();
     memberConnection.socket.send(JSON.stringify({ type: 'update', batchId, update: encodeUpdate(bytes) }));
     await next(memberConnection, 'ack', batchId);
+    await compactPage(pool, pageId, owner);
     const url = `/api/pages/${pageId}`;
     const headers = { origin, cookie: owner.cookie, 'x-kikit-account': owner.accountId };
     expect((await app.inject({ method: 'DELETE', url, headers: { origin } })).statusCode).toBe(401);
@@ -197,8 +199,9 @@ describe.skipIf(!databaseUrl)('shared pages with distinct authenticated accounts
     expect(deleted.headers['x-kikit-account']).toBe(owner.accountId);
     expect((await next(ownerConnection, 'error')).code).toBe('ACCESS_DENIED');
     expect((await next(memberConnection, 'error')).code).toBe('ACCESS_DENIED');
-    const tombstone = (await pool.query('SELECT title, initial_state, deleted_at FROM pages WHERE id=$1', [pageId])).rows[0];
+    const tombstone = (await pool.query('SELECT title, initial_state, snapshot_state, snapshot_sequence, deleted_at FROM pages WHERE id=$1', [pageId])).rows[0];
     expect(tombstone.title).toBe(''); expect(tombstone.initial_state).toHaveLength(0);
+    expect(tombstone.snapshot_state).toBeNull(); expect(tombstone.snapshot_sequence).toBe('0');
     expect(tombstone.deleted_at).toBeInstanceOf(Date);
     for (const table of ['document_updates', 'receipts', 'page_invitations', 'page_grants']) {
       expect((await pool.query(`SELECT count(*)::int AS count FROM ${table} WHERE page_id=$1`, [pageId])).rows[0].count).toBe(0);

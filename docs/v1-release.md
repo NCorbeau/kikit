@@ -16,7 +16,7 @@ The existing editor, private accounts and signed-in sharing remain the baseline.
 | Permanent owner-only deletion | [MAC-95](https://linear.app/mglownia/issue/MAC-95) | Implemented locally with passing checks; review/CI and hosted proof remain |
 | Hosted backups and isolated restoration | [MAC-102](https://linear.app/mglownia/issue/MAC-102) | Open; targets remain unverified |
 | Binary recovery import | [MAC-103](https://linear.app/mglownia/issue/MAC-103) | Required; open |
-| Document snapshots and safe compaction | [MAC-153](https://linear.app/mglownia/issue/MAC-153) | Required; open |
+| Document snapshots and safe compaction | [MAC-153](https://linear.app/mglownia/issue/MAC-153) | Implemented locally with passing PostgreSQL/browser/restore checks; review/CI and hosted rollout remain |
 | Stylesheet organization/refactor | [MAC-112](https://linear.app/mglownia/issue/MAC-112) | Required; open |
 | Browser/native input/accessibility | [MAC-104](https://linear.app/mglownia/issue/MAC-104) | Supported platforms and full evidence remain open |
 | Hard crashes, partitions, overload and slow recipients | [MAC-105](https://linear.app/mglownia/issue/MAC-105) | Open beyond previously recorded failure checks |

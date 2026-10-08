@@ -1,12 +1,12 @@
 # Permanent note deletion
 
-Implemented locally on 2026-10-07. This extends the [account](accounts-contract.md) and [shared-page](shared-pages-contract.md) slices and follows the accepted [data policy](data-policy.md). Database compatibility advances to 5 through `0004_page_deletion.sql`; document schema 2 and wire protocol 2 are unchanged. This source is not deployed.
+Implemented locally on 2026-10-07. This extends the [account](accounts-contract.md) and [shared-page](shared-pages-contract.md) slices and follows the accepted [data policy](data-policy.md). Database compatibility advances to 5 through `0004_page_deletion.sql`; the subsequent [snapshot slice](snapshot-contract.md) advances it to 6. Document schema 2 and wire protocol 2 are unchanged. This source is not deployed.
 
 ## Authorization and transaction
 
 `DELETE /api/pages/:pageId` requires a real Better Auth session, the same-origin mutation guard, a valid UUID and an `X-Kikit-Account` header matching the session account. The server holds the page queue through the transaction and live-access revalidation. Session, page and owner grant are checked under locks; an editor cannot delete a note.
 
-One transaction removes the note's receipts, binary updates, invitations and grants, clears title/initial binary content, and marks `pages.deleted_at`. The retained content-free page identity, owner, schema/sequence and creation/deletion timestamps prevent a delayed creation retry from seeding the page again. Deleted pages do not appear in lists or count against the active owned-note limit. Load, write, invitation and membership paths deny access. Repeated deletion by the same authenticated owner succeeds without changing the marker.
+One transaction removes the note's receipts (including repair bytes), binary updates, invitations and grants, clears title/initial binary content and snapshot content/boundary, and marks `pages.deleted_at`. The retained content-free page identity, owner, schema/sequence and creation/deletion timestamps prevent a delayed creation retry from seeding the page again. Deleted pages do not appear in lists or count against the active owned-note limit. Load, write, invitation and membership paths deny access. Repeated deletion by the same authenticated owner succeeds without changing the marker.
 
 The page lock orders deletion behind an already authorized database commit. An ordinary failure rolls back all changes. An uncertain commit invalidates the room through the existing access-mutation recovery path; an owner retry resolves the persisted marker. No client success response precedes commit and room revalidation. The queue remains held until the operation settles.
 

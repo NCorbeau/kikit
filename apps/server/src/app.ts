@@ -82,7 +82,8 @@ export async function createServer(options: ServerOptions = {}): Promise<Fastify
     registerAccountRoutes(app, pool, identity, fixture);
     registerSharingRoutes(app, pool, rooms, identity);
     registerPageDeletionRoute(app, pool, rooms, identity);
-    registerTestRoutes(app, faults, () => ({ ...rooms.queues.metrics, rooms: rooms.size, connections: connections.size }));
+    registerTestRoutes(app, faults, () => ({ ...rooms.queues.metrics, snapshots: rooms.snapshotMetrics,
+      rooms: rooms.size, connections: connections.size }));
     app.get('/api/sync', {
       websocket: true,
       preValidation: async (request, reply) => {

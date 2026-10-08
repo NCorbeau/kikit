@@ -16,6 +16,7 @@ import { AccessError } from './persistence-errors.js';
 import { PageQueues } from './queue.js';
 import { TestFaults } from './test-faults.js';
 import { RoomPresence } from './presence.js';
+import { compactPage, SNAPSHOT_UPDATE_LIMIT, SNAPSHOT_TAIL_BYTE_LIMIT } from './document-snapshots.js';
 import {
   isRejectedUpdate,
   reportFailure,
@@ -25,6 +26,10 @@ import {
 interface Room {
   doc: Y.Doc;
   sequence: number;
+  snapshotSequence: number;
+  tailBytes: number;
+  snapshotAttemptSequence: number;
+  snapshotAttemptTailBytes: number;
   sockets: Set<WebSocket>;
   presence: RoomPresence;
   presenceIsSerialized: boolean;
@@ -34,6 +39,7 @@ type UpdateMessage = Extract<ClientMessage, { type: 'update' }>;
 /** Owns per-page sequencing from authorization through commit and propagation. */
 export class SyncRooms {
   readonly queues = new PageQueues();
+  readonly snapshotMetrics = { attempted: 0, completed: 0, failures: 0, prunedUpdates: 0, processingMs: 0 };
   private readonly rooms = new Map<string, Room>();
   private readonly principals = new WeakMap<WebSocket, Principal>();
 
@@ -91,6 +97,8 @@ export class SyncRooms {
     }
     const room: Room = {
       ...loaded,
+      snapshotAttemptSequence: loaded.snapshotSequence,
+      snapshotAttemptTailBytes: 0,
       sockets: new Set(),
       presenceIsSerialized: false,
       presence: new RoomPresence(loaded.doc, update => this.changedPresence(pageId, room, update)),
@@ -195,7 +203,30 @@ export class SyncRooms {
       // A duplicate receipt keeps its original sequence. Only new commits advance the room.
       if (!result.duplicate) this.applyCommittedUpdate(pageId, room, socket, result, update);
       this.acknowledgeCommittedBatch(socket, message.batchId, result);
+      await this.compactCommittedTail(pageId, room, this.principals.get(socket)!);
     });
+  }
+
+  private async compactCommittedTail(pageId: string, room: Room, principal: Principal): Promise<void> {
+    if (room.sequence - room.snapshotAttemptSequence < SNAPSHOT_UPDATE_LIMIT
+      && room.tailBytes - room.snapshotAttemptTailBytes < SNAPSHOT_TAIL_BYTE_LIMIT) return;
+    const started = performance.now();
+    room.snapshotAttemptSequence = room.sequence;
+    room.snapshotAttemptTailBytes = room.tailBytes;
+    this.snapshotMetrics.attempted++;
+    try {
+      const result = await compactPage(this.pool, pageId, principal);
+      room.snapshotSequence = result.snapshotSequence;
+      room.tailBytes = 0;
+      room.snapshotAttemptTailBytes = 0;
+      this.snapshotMetrics.completed++;
+      this.snapshotMetrics.prunedUpdates += result.prunedUpdates;
+    } catch {
+      // Maintenance cannot revoke an already committed edit or its receipt.
+      // Retain snapshot/tail; retry after another threshold or a new room load.
+      this.snapshotMetrics.failures++;
+      console.warn('Document compaction failed; committed state and receipts are retained.');
+    } finally { this.snapshotMetrics.processingMs += performance.now() - started; }
   }
 
   private acknowledgeCommittedBatch(socket: WebSocket, batchId: string, result: CommitResult): void {
@@ -309,6 +340,7 @@ export class SyncRooms {
       const committedUpdate = result.committedUpdate ?? submittedUpdate;
       Y.applyUpdate(room.doc, committedUpdate);
       room.sequence = result.sequence;
+      room.tailBytes += committedUpdate.byteLength;
       for (const peer of room.sockets) {
         if (peer !== author) {
           sendMessage(peer, {

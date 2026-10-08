@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, asc, eq, inArray, lte } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import * as Y from 'yjs';
@@ -7,6 +7,7 @@ import { DOCUMENT_SCHEMA_VERSION } from '@kikit/contracts';
 import { AccessError, CompatibilityError, ReceiptConflict } from './persistence-errors.js';
 import { documentUpdates, pageGrants, pages, receipts } from './schema.js';
 import { lockSession } from './pages.js';
+import { hydrateStoredDocument } from './document-storage.js';
 
 export { AccessError, CompatibilityError, ReceiptConflict } from './persistence-errors.js';
 export { migrateDatabase } from './migrations.js';
@@ -27,7 +28,7 @@ export interface CommitHooks {
 interface StoredReceipt {
   payloadHash: string;
   sequence: number;
-  payload: Buffer;
+  repairPayload: Buffer | null;
 }
 interface NewBatch {
   pageId: string;
@@ -35,6 +36,7 @@ interface NewBatch {
   payloadHash: string;
   sequence: number;
   update: Uint8Array;
+  repairPayload: Buffer | null;
 }
 
 export function createPool(connectionString: string): pg.Pool {
@@ -54,16 +56,13 @@ export function createPool(connectionString: string): pg.Pool {
   return pool;
 }
 
-async function authorizeLockedPage(
+export async function authorizeLockedPage(
   db: NodePgDatabase,
   pageId: string,
   accountId: string,
 ) {
-  // Lock the page before its grant. Select original document columns so the
-  // legacy-schema adoption drill can still read retained bytes before migration.
-  const [page] = await db.select({
-    sequence: pages.sequence, initialState: pages.initialState, schemaVersion: pages.schemaVersion,
-  }).from(pages).where(eq(pages.id, pageId)).for('update');
+  // Lock the page before its grant. All callers run after migrations.
+  const [page] = await db.select().from(pages).where(and(eq(pages.id, pageId), isNull(pages.deletedAt))).for('update');
   if (!page) throw new AccessError('Page access denied');
   const [grant] = await db.select().from(pageGrants).where(and(
     eq(pageGrants.pageId, pageId), eq(pageGrants.accountId, accountId),
@@ -81,7 +80,7 @@ export async function loadPage(
   pageId: string,
   accountId: string,
   sessionId?: string,
-): Promise<{ doc: Y.Doc; sequence: number }> {
+): Promise<{ doc: Y.Doc; sequence: number; snapshotSequence: number; tailBytes: number }> {
   const client = await pool.connect();
   const db = drizzle(client);
   const doc = new Y.Doc();
@@ -90,14 +89,9 @@ export async function loadPage(
     await client.query('BEGIN');
     await lockSession(db, { accountId, sessionId });
     const page = await authorizeLockedPage(db, pageId, accountId);
-    Y.applyUpdate(doc, page.initialState);
-    const updates = await db.select({ payload: documentUpdates.payload })
-      .from(documentUpdates)
-      .where(and(eq(documentUpdates.pageId, pageId), lte(documentUpdates.sequence, page.sequence)))
-      .orderBy(asc(documentUpdates.sequence));
-    for (const row of updates) Y.applyUpdate(doc, row.payload);
+    const tailBytes = await hydrateStoredDocument(db, page, doc);
     await client.query('COMMIT');
-    return { doc, sequence: page.sequence };
+    return { doc, sequence: page.sequence, snapshotSequence: page.snapshotSequence, tailBytes };
   } catch (error) {
     doc.destroy();
     try {
@@ -140,7 +134,8 @@ export async function commitUpdate(
     // Hash immutable client bytes; validation may add a repair to the stored payload.
     const committedUpdate = hooks.validate?.() ?? update;
     const sequence = page.sequence + 1;
-    await storeNewBatch(db, { pageId, batchId, payloadHash, sequence, update: committedUpdate }, hooks);
+    const repairPayload = Buffer.from(committedUpdate).equals(Buffer.from(update)) ? null : Buffer.from(committedUpdate);
+    await storeNewBatch(db, { pageId, batchId, payloadHash, sequence, update: committedUpdate, repairPayload }, hooks);
     await hooks.beforeCommit?.();
     // No client timeout races this transaction. Unknown results stay unacknowledged.
     await client.query('COMMIT');
@@ -167,27 +162,24 @@ async function findCommittedReceipt(
   const [receipt] = await db.select({
     payloadHash: receipts.payloadHash,
     sequence: receipts.sequence,
-    payload: documentUpdates.payload,
+    repairPayload: receipts.repairPayload,
   }).from(receipts)
-    .innerJoin(documentUpdates, and(
-      eq(documentUpdates.pageId, receipts.pageId),
-      eq(documentUpdates.sequence, receipts.sequence),
-    ))
     .where(and(eq(receipts.pageId, pageId), eq(receipts.batchId, batchId)));
   return receipt;
 }
 
 function duplicateCommitResult(receipt: StoredReceipt, submittedUpdate: Uint8Array): CommitResult {
   // Return the originally stored repair, never generate another one on replay.
-  const repairedPayload = receipt.payload.equals(submittedUpdate) ? {} : { committedUpdate: receipt.payload };
+  const repairedPayload = !receipt.repairPayload || receipt.repairPayload.equals(submittedUpdate)
+    ? {} : { committedUpdate: receipt.repairPayload };
   return { sequence: receipt.sequence, duplicate: true, ...repairedPayload };
 }
 
 /** These writes share the caller's transaction and follow candidate validation. */
 async function storeNewBatch(db: NodePgDatabase, batch: NewBatch, hooks: CommitHooks): Promise<void> {
-  const { pageId, batchId, payloadHash, sequence, update } = batch;
+  const { pageId, batchId, payloadHash, sequence, update, repairPayload } = batch;
   await db.insert(documentUpdates).values({ pageId, sequence, payload: Buffer.from(update) });
-  await db.insert(receipts).values({ pageId, batchId, payloadHash, sequence });
+  await db.insert(receipts).values({ pageId, batchId, payloadHash, sequence, repairPayload });
   await db.update(pages).set({
     sequence,
     ...(hooks.projectTitle ? { title: hooks.projectTitle() } : {}),

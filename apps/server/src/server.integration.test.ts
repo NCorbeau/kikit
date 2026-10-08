@@ -6,6 +6,8 @@ import { DEV_ACCOUNT_ID, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, decodeUpdate
 import { AccessError, ReceiptConflict, commitUpdate, createPool, loadPage, migrateDatabase } from './persistence.js';
 import { createSeed } from './document.js';
 import { createServer } from './app.js';
+import { compactPage } from './document-snapshots.js';
+import { prepareCommittedUpdate } from './document-candidate.js';
 
 // Opt-in real PostgreSQL tests; each test owns a unique page, never truncates fixtures.
 const databaseUrl = process.env.KIKIT_TEST_DATABASE_URL;
@@ -60,6 +62,131 @@ describe.skipIf(!databaseUrl)('PostgreSQL and WebSocket durable flow', () => {
     doc.destroy();
     return update;
   }
+
+  it('loads binary snapshot plus tail while retaining deleted structs and independent receipts', async () => {
+    const doc = new Y.Doc({ gc: false }); Y.applyUpdate(doc, seed);
+    const text = (doc.getXmlFragment('body').get(0) as Y.XmlElement).get(0) as Y.XmlText;
+    let vector = Y.encodeStateVector(doc); text.insert(0, 'Historical text. ');
+    const first = Y.encodeStateAsUpdate(doc, vector); const batchId = randomUUID();
+    await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, batchId, first);
+    vector = Y.encodeStateVector(doc); text.delete(0, 17);
+    const second = Y.encodeStateAsUpdate(doc, vector);
+    await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, randomUUID(), second);
+    const original = Y.encodeStateAsUpdate(doc);
+    expect(await compactPage(pool, pageId, { accountId: DEV_ACCOUNT_ID })).toEqual({ snapshotSequence: 2, prunedUpdates: 2 });
+    const stored = (await pool.query('SELECT initial_state, snapshot_state, snapshot_sequence FROM pages WHERE id=$1', [pageId])).rows[0];
+    expect(stored.initial_state).toEqual(Buffer.from(seed));
+    expect(stored.snapshot_sequence).toBe('2');
+    const snapshot = new Y.Doc({ gc: false }); Y.applyUpdate(snapshot, stored.snapshot_state);
+    expect(Y.encodeStateAsUpdate(snapshot)).toEqual(original); snapshot.destroy();
+    expect((await pool.query('SELECT * FROM document_updates WHERE page_id=$1', [pageId])).rowCount).toBe(0);
+    expect((await pool.query('SELECT * FROM receipts WHERE page_id=$1', [pageId])).rowCount).toBe(2);
+    expect(await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, batchId, first)).toEqual({ sequence: 1, duplicate: true });
+    await expect(commitUpdate(pool, pageId, DEV_ACCOUNT_ID, batchId, edit('Changed bytes'))).rejects.toBeInstanceOf(ReceiptConflict);
+    vector = Y.encodeStateVector(doc); text.insert(0, 'New tail. ');
+    const tail = Y.encodeStateAsUpdate(doc, vector);
+    expect((await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, randomUUID(), tail)).sequence).toBe(3);
+    const loaded = await loadPage(pool, pageId, DEV_ACCOUNT_ID);
+    expect(loaded.sequence).toBe(3); expect(loaded.snapshotSequence).toBe(2); expect(loaded.tailBytes).toBe(tail.byteLength);
+    expect(loaded.doc.getXmlFragment('body').toString()).toEqual(doc.getXmlFragment('body').toString());
+    expect(Y.encodeStateVector(loaded.doc)).toEqual(Y.encodeStateVector(doc));
+    loaded.doc.destroy(); doc.destroy();
+  });
+
+  it('returns the exact original repair after its update row has been pruned', async () => {
+    const doc = new Y.Doc(); Y.applyUpdate(doc, seed);
+    const vector = Y.encodeStateVector(doc); doc.getXmlFragment('body').delete(0, 1);
+    const update = Y.encodeStateAsUpdate(doc, vector); doc.destroy();
+    const committed = new Y.Doc(); Y.applyUpdate(committed, seed);
+    const repair = prepareCommittedUpdate(committed, update).repairedUpdate!; committed.destroy();
+    const batchId = randomUUID();
+    const first = await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, batchId, update, { validate: () => repair });
+    expect(first.committedUpdate).toEqual(repair);
+    await compactPage(pool, pageId, { accountId: DEV_ACCOUNT_ID });
+    expect((await pool.query('SELECT * FROM document_updates WHERE page_id=$1', [pageId])).rowCount).toBe(0);
+    const replay = await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, batchId, update, { validate: () => { throw new Error('Must not validate a receipt'); } });
+    expect(replay).toEqual({ sequence: 1, duplicate: true, committedUpdate: Buffer.from(repair) });
+    const loaded = await loadPage(pool, pageId, DEV_ACCOUNT_ID);
+    expect(loaded.doc.getXmlFragment('body').length).toBe(1); loaded.doc.destroy();
+  });
+
+  it('retains a committed newer tail between snapshot commit and covered-update pruning', async () => {
+    await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, randomUUID(), edit('Before snapshot. '));
+    await compactPage(pool, pageId, { accountId: DEV_ACCOUNT_ID }, {
+      afterSnapshotCommit: async () => {
+        expect((await pool.query('SELECT snapshot_sequence FROM pages WHERE id=$1', [pageId])).rows[0].snapshot_sequence).toBe('1');
+        const loaded = await loadPage(pool, pageId, DEV_ACCOUNT_ID);
+        const vector = Y.encodeStateVector(loaded.doc);
+        ((loaded.doc.getXmlFragment('body').get(0) as Y.XmlElement).get(0) as Y.XmlText).insert(0, 'After snapshot. ');
+        const update = Y.encodeStateAsUpdate(loaded.doc, vector); loaded.doc.destroy();
+        await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, randomUUID(), update);
+      },
+    });
+    expect((await pool.query('SELECT sequence FROM document_updates WHERE page_id=$1', [pageId])).rows).toEqual([{ sequence: '2' }]);
+    const loaded = await loadPage(pool, pageId, DEV_ACCOUNT_ID);
+    expect(loaded.sequence).toBe(2); expect(loaded.snapshotSequence).toBe(1);
+    expect(loaded.doc.getXmlFragment('body').toString()).toContain('After snapshot. Before snapshot.'); loaded.doc.destroy();
+  });
+
+  it('recovers interrupted snapshot/prune phases without losing state or receipts', async () => {
+    const update = edit('Survives interruption. '); const batchId = randomUUID();
+    await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, batchId, update);
+    await expect(compactPage(pool, pageId, { accountId: DEV_ACCOUNT_ID }, {
+      beforeSnapshotCommit: async () => { throw new Error('Interrupted before snapshot commit'); },
+    })).rejects.toThrow('Interrupted before');
+    expect((await pool.query('SELECT snapshot_state FROM pages WHERE id=$1', [pageId])).rows[0].snapshot_state).toBeNull();
+    await expect(compactPage(pool, pageId, { accountId: DEV_ACCOUNT_ID }, {
+      afterSnapshotCommit: async () => { throw new Error('Interrupted after snapshot commit'); },
+    })).rejects.toThrow('Interrupted after');
+    const persisted = (await pool.query('SELECT snapshot_state FROM pages WHERE id=$1', [pageId])).rows[0].snapshot_state;
+    expect(persisted).toBeInstanceOf(Buffer);
+    expect((await pool.query('SELECT * FROM document_updates WHERE page_id=$1', [pageId])).rowCount).toBe(1);
+    await expect(compactPage(pool, pageId, { accountId: DEV_ACCOUNT_ID }, {
+      beforePruneCommit: async () => { throw new Error('Interrupted before prune commit'); },
+    })).rejects.toThrow('Interrupted before prune');
+    expect((await pool.query('SELECT * FROM document_updates WHERE page_id=$1', [pageId])).rowCount).toBe(1);
+    const loaded = await loadPage(pool, pageId, DEV_ACCOUNT_ID);
+    expect(loaded.doc.getXmlFragment('body').toString()).toContain('Survives interruption.'); loaded.doc.destroy();
+    expect(await compactPage(pool, pageId, { accountId: DEV_ACCOUNT_ID })).toEqual({ snapshotSequence: 1, prunedUpdates: 1 });
+    expect(await compactPage(pool, pageId, { accountId: DEV_ACCOUNT_ID })).toEqual({ snapshotSequence: 1, prunedUpdates: 0 });
+    expect((await pool.query('SELECT snapshot_state FROM pages WHERE id=$1', [pageId])).rows[0].snapshot_state).toEqual(persisted);
+    expect(await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, batchId, update)).toEqual({ sequence: 1, duplicate: true });
+  });
+
+  it('locks snapshot persistence against an overlapping write and leaves its newer tail intact', async () => {
+    await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, randomUUID(), edit('Initial commit. '));
+    let release!: () => void; let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const compacting = compactPage(pool, pageId, { accountId: DEV_ACCOUNT_ID }, {
+      beforeSnapshotCommit: async () => { entered(); await gate; },
+    });
+    await started;
+    const writing = commitUpdate(pool, pageId, DEV_ACCOUNT_ID, randomUUID(), edit('Concurrent commit. '));
+    try {
+      await vi.waitFor(async () => {
+        const waiting = await pool.query("SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%pages%'");
+        expect(waiting.rows[0].count).toBeGreaterThan(0);
+      });
+    } finally { release(); }
+    expect((await writing).sequence).toBe(2); await compacting;
+    expect((await pool.query('SELECT sequence FROM document_updates WHERE page_id=$1', [pageId])).rows).toEqual([{ sequence: '2' }]);
+    const loaded = await loadPage(pool, pageId, DEV_ACCOUNT_ID);
+    expect(loaded.snapshotSequence).toBe(1); expect(loaded.sequence).toBe(2);
+    expect(loaded.doc.getXmlFragment('body').toString()).toContain('Concurrent commit.');
+    expect(loaded.doc.getXmlFragment('body').toString()).toContain('Initial commit.'); loaded.doc.destroy();
+  });
+
+  it('fails closed on denied compaction or an incomplete committed tail', async () => {
+    await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, randomUUID(), edit('Must remain recoverable. '));
+    await expect(compactPage(pool, pageId, { accountId: 'outsider' })).rejects.toBeInstanceOf(AccessError);
+    expect((await pool.query('SELECT * FROM document_updates WHERE page_id=$1', [pageId])).rowCount).toBe(1);
+    await pool.query('DELETE FROM document_updates WHERE page_id=$1', [pageId]);
+    await expect(loadPage(pool, pageId, DEV_ACCOUNT_ID)).rejects.toThrow('Incomplete committed document tail');
+    await expect(compactPage(pool, pageId, { accountId: DEV_ACCOUNT_ID })).rejects.toThrow('Incomplete committed document tail');
+    expect((await pool.query('SELECT snapshot_state FROM pages WHERE id=$1', [pageId])).rows[0].snapshot_state).toBeNull();
+    expect((await pool.query('SELECT * FROM receipts WHERE page_id=$1', [pageId])).rowCount).toBe(1);
+  });
 
   it('commits bytes and receipts atomically; retries preserve sequence and reject reused identities', async () => {
     const batchId = randomUUID();
@@ -124,6 +251,49 @@ describe.skipIf(!databaseUrl)('PostgreSQL and WebSocket durable flow', () => {
     expect((await next()).type).toBe('sync');
     return { socket, next };
   }
+
+  it('acknowledges durable edits through a real snapshot failure, then retries compaction in the same live room', async () => {
+    const doc = new Y.Doc(); Y.applyUpdate(doc, seed);
+    const text = (doc.getXmlFragment('body').get(0) as Y.XmlElement).get(0) as Y.XmlText;
+    const append = () => {
+      const vector = Y.encodeStateVector(doc); text.insert(text.length, 'x');
+      return Y.encodeStateAsUpdate(doc, vector);
+    };
+    for (let index = 0; index < 99; index++) await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, randomUUID(), append());
+    app = await createServer({ databaseUrl }); await app.listen({ host: '127.0.0.1', port: 0 });
+    const connection = await connect();
+    const name = `deny_snapshot_${randomUUID().replaceAll('-', '')}`;
+    await pool.query(`CREATE FUNCTION ${name}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Injected snapshot failure'; END $$`);
+    await pool.query(`CREATE TRIGGER ${name} BEFORE UPDATE OF snapshot_state ON pages FOR EACH ROW EXECUTE FUNCTION ${name}()`);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const batchId = randomUUID();
+      connection.socket.send(JSON.stringify({ type: 'update', batchId, update: encodeUpdate(append()) }));
+      expect(await connection.next()).toEqual({ type: 'ack', batchId, sequence: 100 });
+      await vi.waitFor(async () => expect((await app!.inject('/api/test/metrics')).json().snapshots.failures).toBe(1));
+      expect((await pool.query('SELECT snapshot_state FROM pages WHERE id=$1', [pageId])).rows[0].snapshot_state).toBeNull();
+      expect((await pool.query('SELECT * FROM receipts WHERE page_id=$1', [pageId])).rowCount).toBe(100);
+      expect(connection.socket.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      await pool.query(`DROP TRIGGER ${name} ON pages`); await pool.query(`DROP FUNCTION ${name}()`); warning.mockRestore();
+    }
+    let batchId = ''; let update: Uint8Array = new Uint8Array();
+    for (let sequence = 101; sequence <= 200; sequence++) {
+      batchId = randomUUID(); update = append();
+      connection.socket.send(JSON.stringify({ type: 'update', batchId, update: encodeUpdate(update) }));
+      expect(await connection.next()).toEqual({ type: 'ack', batchId, sequence });
+      if (sequence === 199) expect((await app.inject('/api/test/metrics')).json().snapshots.attempted).toBe(1);
+    }
+    await vi.waitFor(async () => expect((await app!.inject('/api/test/metrics')).json().snapshots.completed).toBe(1));
+    expect((await pool.query('SELECT * FROM document_updates WHERE page_id=$1', [pageId])).rowCount).toBe(0);
+    expect((await pool.query('SELECT * FROM receipts WHERE page_id=$1', [pageId])).rowCount).toBe(200);
+    connection.socket.close(); await app.close(); app = undefined;
+    const loaded = await loadPage(pool, pageId, DEV_ACCOUNT_ID);
+    expect(loaded.sequence).toBe(200); expect(loaded.snapshotSequence).toBe(200);
+    expect(loaded.doc.getXmlFragment('body').toString()).toEqual(doc.getXmlFragment('body').toString());
+    loaded.doc.destroy(); doc.destroy();
+    expect(await commitUpdate(pool, pageId, DEV_ACCOUNT_ID, batchId, update)).toEqual({ sequence: 200, duplicate: true });
+  });
 
   it.each(['body', 'taskList'])('commits an empty-%s repair atomically and replays its original bytes under the client payload hash', async container => {
     const base = new Y.Doc();

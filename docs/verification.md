@@ -408,3 +408,28 @@ New PostgreSQL scenarios verify owner/editor/outsider isolation, origin/account 
 The first integration run failed only because the new injected-failure assertion expected the nested PostgreSQL message in Drizzle's wrapper; the corrected assertion and persisted-state checks passed. The first browser run found an ambiguous test selector between the failed-save banner and confirmation download button; explicitly scoping the test to its dialog produced the full passing rerun. These corrections did not change production behavior. Existing upstream task-list selection warnings and failure-test disconnect logs remain.
 
 No normal development database was migrated, no Railway configuration/deployment or paid resource was changed, and no hosted deletion, backup schedule or restore target is established. Recovery import and document snapshots/compaction are required v1 work still to implement. The four-hour recovery target and six-day retention remain targets for the separate hosted drill.
+
+## 2026-10-07: Binary snapshots and independent receipts
+
+Implemented on top of deletion commit `683a05e` in the same isolated feature worktree. Database compatibility advances to 6; document schema 2 and protocol 2 remain unchanged. `0005_document_snapshots.sql` adds the binary snapshot boundary and receipt repair bytes, backfills existing repairs, and removes only the receipt-to-update foreign key. It does not rewrite the original seed, batch hashes, identities, sequences or creation timestamps. The [snapshot contract](snapshot-contract.md) records commit-before-prune behavior, maintenance thresholds and size/failure limits.
+
+Fresh checks used the same local macOS/Apple Silicon, Node 24, pnpm 12.5.1, PostgreSQL 17.9 and Playwright 1.63.0/Chromium setup. Database/browser suites used disposable data and did not run concurrently. Authenticated browser checks used actual Better Auth sessions and production assets; external email delivery and hosted volume recovery were not exercised.
+
+| Check | Result |
+| --- | --- |
+| `pnpm typecheck` | Passed |
+| `pnpm test` | 126 passed; 48 opt-in PostgreSQL checks skipped |
+| `pnpm test:integration` | All 48 passed: 16 persistence/WebSocket, 8 migrations, 7 accounts, 12 sharing, 5 presence |
+| `pnpm test:e2e` | All 23 fixture browser scenarios passed |
+| `pnpm test:e2e:accounts` | All 12 authenticated scenarios passed |
+| `COMPOSE_PROJECT_NAME=kikit pnpm test:restore` | Passed: exact snapshot/tail/receipt/deletion records, restored session/access, old receipt replay after pruning, continued editing and runtime DDL denial |
+| `pnpm build` | Passed through authenticated suite; web assets unchanged, existing chunk advisory remains |
+| `git diff --check` | Passed |
+
+New PostgreSQL checks cover exact binary preservation with deleted structures, loading snapshot plus tail, independent normal/repaired receipt replay after pruning, a legacy repaired-receipt migration, explicit phase interruption/rollback, overlapping snapshot/write locks, newer commits between persistence and pruning, denied access and incomplete-tail failure. A real database snapshot-failure trigger demonstrates that the edit is still acknowledged and the same live room remains usable; another threshold retries compaction. Deleting a compacted shared page also removes its snapshot.
+
+The authenticated browser scenario seeds a small committed history with no editor room active, then crosses the 100-update threshold through the real UI while the acknowledgement is deliberately lost. Reconnect uses the original receipt after its update row is pruned. Another account retains an offline draft and its original pending IDs through an offline reload; a server stop/start rebuilds from snapshot plus newer tail, and both accounts converge after the draft is committed exactly once. Stable body block IDs are retained.
+
+An initial migration assertion needed to account for the added nullable repair column while still comparing all prior receipt fields. The first browser run reached its recovery assertions but extra reloads exceeded the authentication limiter shared by this suite's loopback peer. Removing those redundant reloads retained the restart/offline assertions and produced the full passing run without weakening production rate limiting. The diagnostics helper now waits for the note menu on reload instead of opening an intermediate account-shell menu. Existing upstream task-list warnings remain.
+
+Phase hooks and database locks establish these local interruption boundaries; they are not hard process-kill or network-partition evidence. Those gates remain separate. History exceeding the existing 2 MiB snapshot guard leaves its committed source unpruned. No capacity/latency claim, production rollout, backup schedule or hosted recovery guarantee is established by these checks.
