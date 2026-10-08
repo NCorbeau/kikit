@@ -358,3 +358,96 @@ describe('local update journal', () => {
     expect((again as CacheCompatibilityError).recovery.updates).toEqual([record]);
   });
 });
+
+it('imports all batches atomically, retains acknowledged markers and rolls back identity conflicts', async () => {
+  const journal = store(new IDBFactory());
+  const acknowledged = { id: 'acknowledged', update: new Uint8Array([1, 2]), pending: false };
+  await journal.append(acknowledged, true);
+  const next = { id: 'new-pending', update: new Uint8Array([3, 4]), pending: true };
+  await expect(journal.importUpdates([next, { ...acknowledged, update: new Uint8Array([9]), pending: true }])).rejects.toThrow('conflicts');
+  expect((await journal.load()).updates).toEqual([acknowledged]);
+  const imported = await journal.importUpdates([{ ...acknowledged, pending: true }, next]);
+  expect(imported).toEqual([acknowledged, next]);
+  expect((await journal.load()).initialized).toBe(true);
+});
+
+it('persists recovery prerequisites ahead of older pending batches across reopen and future appends', async () => {
+  const factory = new IDBFactory(); const journal = store(factory);
+  const acknowledged = { id: 'seed', update: new Uint8Array([1]), pending: false };
+  const older = { id: 'older-dependent', update: new Uint8Array([2]), pending: true };
+  const imported = { id: 'imported-dependent', update: new Uint8Array([3]), pending: true };
+  const first = { id: 'history-repair', update: new Uint8Array([4]), pending: true };
+  const second = { id: 'later-history-repair', update: new Uint8Array([5]), pending: true };
+  await journal.append(acknowledged, true); await journal.append(older);
+  await journal.importUpdates([{ ...acknowledged, pending: true }, imported], first);
+  await journal.acknowledge(first.id);
+  await journal.importUpdates([], second);
+  journal.close();
+  const reopened = store(factory);
+  const loaded = await reopened.load();
+  expect(loaded.initialized).toBe(true);
+  expect(loaded.updates).toEqual([second, { ...first, pending: false }, acknowledged, older, imported]);
+  const future = { id: 'future-edit', update: new Uint8Array([6]), pending: true };
+  await reopened.append(future);
+  expect((await reopened.load()).updates).toEqual([...loaded.updates, future]);
+  // A retry must not resurrect an acknowledged prerequisite or move old rows.
+  await reopened.importUpdates([], first);
+  expect((await reopened.load()).updates).toEqual([...loaded.updates, future]);
+});
+
+it('rolls back a prepended recovery prerequisite and all new records when a later ID conflicts', async () => {
+  const journal = store(new IDBFactory());
+  const acknowledged = { id: 'acknowledged', update: new Uint8Array([1]), pending: false };
+  await journal.append(acknowledged, true);
+  const prerequisite = { id: 'repair', update: new Uint8Array([2]), pending: true };
+  const first = { id: 'new-first', update: new Uint8Array([3]), pending: true };
+  await expect(journal.importUpdates([first, { ...acknowledged, update: new Uint8Array([4]) }], prerequisite)).rejects.toThrow('conflicts');
+  expect(await journal.load()).toEqual({ initialized: true, updates: [acknowledged] });
+});
+
+it.each(['append', 'acknowledge'] as const)('rejects stale recovery staging after another tab commits an %s before any import writes', async change => {
+  const factory = new IDBFactory(); const journal = store(factory); const other = store(factory);
+  const original = { id: 'original', update: new Uint8Array([1]), pending: true };
+  const concurrent = { id: 'concurrent', update: new Uint8Array([2]), pending: true };
+  const imported = { id: 'imported', update: new Uint8Array([3]), pending: true };
+  const prerequisite = { id: 'prerequisite', update: new Uint8Array([4]), pending: true };
+  await journal.append(original, true); const staged = await journal.load();
+  if (change === 'append') await other.append(concurrent);
+  else await other.acknowledge(original.id);
+  const committed = await other.load();
+  await expect(journal.importUpdates([imported], prerequisite, staged)).rejects.toThrow('changed in another tab');
+  expect(await journal.load()).toEqual(committed);
+  expect(await other.load()).toEqual(committed);
+});
+
+it('retains the original UUID spelling, acknowledged marker and order when importing matching case aliases', async () => {
+  const journal = store(new IDBFactory());
+  const saved = { id: 'abcdef12-abcd-4abc-8abc-abcdef123456', update: new Uint8Array([1]), pending: false };
+  const pending = { id: 'fedcba12-abcd-4abc-8abc-abcdef123456', update: new Uint8Array([2]), pending: true };
+  await journal.append(saved, true); await journal.append(pending);
+  const before = await journal.load();
+  await journal.importUpdates([{ ...saved, id: saved.id.toUpperCase(), pending: true },
+    { ...pending, id: pending.id.toUpperCase() }], { ...saved, id: saved.id.toUpperCase(), pending: true }, before);
+  expect(await journal.load()).toEqual(before);
+});
+
+it('rolls back a whole recovery import when a UUID case alias reuses a durable identity with different bytes', async () => {
+  const journal = store(new IDBFactory());
+  const saved = { id: 'abcdef12-abcd-4abc-8abc-abcdef123456', update: new Uint8Array([1]), pending: false };
+  await journal.append(saved, true); const before = await journal.load();
+  const prerequisite = { id: 'repair', update: new Uint8Array([2]), pending: true };
+  const first = { id: 'new-source', update: new Uint8Array([3]), pending: true };
+  await expect(journal.importUpdates([first, { ...saved, id: saved.id.toUpperCase(), update: new Uint8Array([4]), pending: true }],
+    prerequisite, before)).rejects.toThrow('conflicts');
+  expect(await journal.load()).toEqual(before);
+});
+
+it('preserves existing conflicting UUID alias rows and refuses recovery without modifying their bytes or flags', async () => {
+  const journal = store(new IDBFactory());
+  const original = { id: 'abcdef12-abcd-4abc-8abc-abcdef123456', update: new Uint8Array([1]), pending: false };
+  const alias = { ...original, id: original.id.toUpperCase(), update: new Uint8Array([2]), pending: true };
+  await journal.append(original, true); await journal.append(alias); const before = await journal.load();
+  await expect(journal.importUpdates([{ id: 'new-source', update: new Uint8Array([3]), pending: true }],
+    { id: 'repair', update: new Uint8Array([4]), pending: true }, before)).rejects.toThrow('conflicts');
+  expect(await journal.load()).toEqual(before);
+});

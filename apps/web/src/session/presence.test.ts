@@ -104,7 +104,7 @@ it('handles peer awareness while document persistence is blocked without adding 
   const store: DocumentStore = {
     load: async () => ({ initialized: false, updates: [] }),
     append: async record => { await gate; records.push(record); },
-    acknowledge: async () => {}, close() {},
+    acknowledge: async () => {}, importUpdates: async () => records, close() {},
   };
   let callbacks!: Parameters<NonNullable<SessionDependencies['transport']>>[0];
   const sent: ClientMessage[] = [];

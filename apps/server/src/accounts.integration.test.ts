@@ -180,6 +180,93 @@ describe.skipIf(!databaseUrl)('magic-link accounts and private notes on PostgreS
     }
   });
 
+  it('recovers a deleted note as a private binary copy, binds retries, and rejects account/version/origin changes', async () => {
+    const owner = await login(), outsider = await login();
+    const source = await create(owner.cookie);
+    const original = await loadPage(pool, source, owner.accountId, owner.sessionId);
+    const initialCommitted = Y.encodeStateAsUpdate(original.doc);
+    const title = (original.doc.getXmlFragment('title').get(0) as Y.XmlElement);
+    const titleText = title.get(0) as Y.XmlText;
+    const before = Y.encodeStateVector(original.doc);
+    titleText.insert(0, 'Recovered binary note');
+    const pending = { batchId: randomUUID(), update: encodeUpdate(Y.encodeStateAsUpdate(original.doc, before)) };
+    const recovery = JSON.stringify({ format: 'kikit-recovery', formatVersion: 2, protocolVersion: PROTOCOL_VERSION,
+      schemaVersion: DOCUMENT_SCHEMA_VERSION, accountId: owner.accountId, pageId: source,
+      exportedAt: new Date().toISOString(), update: encodeUpdate(Y.encodeStateAsUpdate(original.doc)), pending: [pending], cachedUpdates: [] });
+    original.doc.destroy();
+    const readRecovery = { url: `/api/pages/${source}/recovery-state`,
+      headers: { cookie: owner.cookie, 'x-kikit-account': owner.accountId } };
+    const committed = await app.inject(readRecovery);
+    expect(committed.statusCode).toBe(200);
+    expect(committed.headers['cache-control']).toBe('no-store');
+    expect(committed.headers['x-kikit-account']).toBe(owner.accountId);
+    expect(committed.json()).toMatchObject({ accountId: owner.accountId, pageId: source,
+      protocolVersion: PROTOCOL_VERSION, schemaVersion: DOCUMENT_SCHEMA_VERSION });
+    // The read returns storage's locked boundary, excluding the unsent recovery edit.
+    expect(decodeUpdate(committed.json().update)).toEqual(initialCommitted);
+    const deniedReads = [
+      { ...readRecovery, headers: {} },
+      { ...readRecovery, headers: { cookie: owner.cookie } },
+      { ...readRecovery, headers: { ...readRecovery.headers, 'x-kikit-account': outsider.accountId } },
+      { ...readRecovery, headers: { cookie: outsider.cookie, 'x-kikit-account': outsider.accountId } },
+    ];
+    for (const [index, deniedRead] of deniedReads.entries()) {
+      const denied = await app.inject(deniedRead);
+      expect(denied.statusCode).toBe(index === 3 ? 403 : 401);
+      expect(denied.headers['cache-control']).toBe('no-store');
+      expect(denied.json()).not.toHaveProperty('update');
+      expect(denied.headers['x-kikit-account']).toBeUndefined();
+    }
+    const deleted = await app.inject({ method: 'DELETE', url: `/api/pages/${source}`,
+      headers: { origin, cookie: owner.cookie, 'x-kikit-account': owner.accountId } });
+    expect(deleted.statusCode).toBe(200);
+    const deletedRead = await app.inject(readRecovery);
+    expect(deletedRead.statusCode).toBe(403);
+    expect(deletedRead.headers['cache-control']).toBe('no-store');
+    expect(deletedRead.json()).not.toHaveProperty('update');
+    const id = randomUUID(); createdPages.push(id);
+    const request = { method: 'POST' as const, url: '/api/recovery/copies',
+      headers: { origin, cookie: owner.cookie, 'x-kikit-account': owner.accountId }, payload: { id, recovery } };
+    expect((await app.inject({ ...request, headers: { ...request.headers, 'x-kikit-account': outsider.accountId } })).statusCode).toBe(401);
+    expect((await app.inject({ ...request, headers: { ...request.headers, cookie: outsider.cookie, 'x-kikit-account': outsider.accountId } })).statusCode).toBe(400);
+    expect((await app.inject({ ...request, headers: { ...request.headers, origin: 'https://foreign.example' } })).statusCode).toBe(403);
+    const recovered = await app.inject(request);
+    expect(recovered.statusCode).toBe(200);
+    expect(recovered.json()).toMatchObject({ id, title: 'Recovered binary note', role: 'owner' });
+    const saved = (await pool.query('SELECT initial_state, creation_input_hash FROM pages WHERE id=$1', [id])).rows[0];
+    expect((await app.inject(request)).statusCode).toBe(200);
+    expect((await pool.query('SELECT initial_state FROM pages WHERE id=$1', [id])).rows[0].initial_state).toEqual(saved.initial_state);
+    expect(saved.creation_input_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect((await pool.query('SELECT account_id, role FROM page_grants WHERE page_id=$1', [id])).rows).toEqual([{ account_id: owner.accountId, role: 'owner' }]);
+    expect((await pool.query('SELECT 1 FROM receipts WHERE page_id=$1', [id])).rowCount).toBe(0);
+    expect((await app.inject({ url: `/api/pages/${id}/session`, headers: { cookie: outsider.cookie } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/pages', headers: request.headers, payload: { id } })).statusCode).toBe(403);
+    const changed = JSON.parse(recovery); changed.update = encodeUpdate(new Uint8Array([0, 0]));
+    expect((await app.inject({ ...request, payload: { id, recovery: JSON.stringify(changed) } })).statusCode).toBe(400);
+    const copied = await loadPage(pool, id, owner.accountId, owner.sessionId);
+    expect(copied.doc.getXmlFragment('title').toString()).toContain('Recovered binary note');
+    const nextVector = Y.encodeStateVector(copied.doc);
+    (copied.doc.getXmlFragment('title').get(0) as Y.XmlElement).insert(1, [new Y.XmlText(' continued')]);
+    const write = Y.encodeStateAsUpdate(copied.doc, nextVector); copied.doc.destroy();
+    expect((await commitUpdate(pool, id, owner.accountId, randomUUID(), write, { sessionId: owner.sessionId })).sequence).toBe(1);
+    const fresh = await app.inject({ ...readRecovery, url: `/api/pages/${id}/recovery-state` });
+    expect(fresh.statusCode).toBe(200);
+    expect(fresh.headers['cache-control']).toBe('no-store');
+    expect(fresh.headers['x-kikit-account']).toBe(owner.accountId);
+    expect(fresh.json()).toMatchObject({ accountId: owner.accountId, pageId: id,
+      protocolVersion: PROTOCOL_VERSION, schemaVersion: DOCUMENT_SCHEMA_VERSION });
+    const current = await loadPage(pool, id, owner.accountId, owner.sessionId);
+    try { expect(decodeUpdate(fresh.json().update)).toEqual(Y.encodeStateAsUpdate(current.doc)); }
+    finally { current.doc.destroy(); }
+    const erased = await app.inject({ method: 'DELETE', url: `/api/pages/${id}`, headers: request.headers });
+    expect(erased.statusCode).toBe(200);
+    expect((await pool.query('SELECT creation_input_hash FROM pages WHERE id=$1', [id])).rows[0].creation_input_hash).toBeNull();
+    expect((await app.inject(request)).statusCode).toBe(403);
+    const erasedRead = await app.inject({ ...readRecovery, url: `/api/pages/${id}/recovery-state` });
+    expect(erasedRead.statusCode).toBe(403);
+    expect(erasedRead.json()).not.toHaveProperty('update');
+  });
+
   it('stops active connections after losing the database ownership connection', async () => {
     const account = await login(); const id = await create(account.cookie);
     const active = await connect(account.cookie, id);
@@ -191,4 +278,5 @@ describe.skipIf(!databaseUrl)('magic-link accounts and private notes on PostgreS
     await app.close();
     await expect(fetch(`${address}/api/health`)).rejects.toThrow();
   });
+
 });

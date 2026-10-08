@@ -24,7 +24,7 @@ Already-compatible journals are read without requiring storage writes. Legacy up
 
 Do not deploy this as a rolling mixture of old and new application instances. Stop admission and drain/stop the existing server before the migration; then start matching new web/server assets. The new server rejects schema-1 handshakes before publishing document state. Existing old sockets end with the stopped server. An older browser tab cannot write into an upgraded journal because its metadata check fails. Old offline shells may still retain version-1 drafts until they reload the updated application; do not clear site data or discard those drafts.
 
-Schema-2 content cannot be safely edited with a schema-1 client. A rollback must preserve both server and browser data rather than downgrade metadata or convert tasks into text. Binary recovery export remains available; there is still no recovery import UI.
+Schema-2 content cannot be safely edited with a schema-1 client. A rollback must preserve both server and browser data rather than downgrade metadata or convert tasks into text. Binary recovery export remains available; compatible files can be imported through the [binary recovery flow](recovery-contract.md).
 
 ## Verification boundary
 

@@ -443,3 +443,17 @@ Fresh `pnpm build`, `pnpm typecheck` and `git diff --check` passed. Five focused
 The first focused run exposed the task-shortcut test's inherited heading state from a prior scenario. Its setup now uses native select-all/delete to establish its own empty paragraph; the focused rerun passes independently of the full suite's preceding editor state. Only test setup changed.
 
 Captured fresh synthetic authenticated account/editor/sharing/menu/deletion screens using the production assets. Inspected desktop light editor and 320px dark note list/menu/deletion screenshots under ignored `.artifacts/style-refactor/`. Modal cancel/menu focus restoration and narrow-layout overflow checks passed. These are visual/Chromium conditions; a full screen-reader/native-mobile/browser audit remains a separate release gate. No public screenshot contains real notes or credentials, and no deployment occurred.
+
+## 2026-10-09: Recovery import persists already committed history locally
+
+Fixed the review finding in recovery PR #24: when the server already contained a recovery file's history but this device had a stale journal, importing a file with no pending batches could display content without persisting it. Recovery planning now independently checks server replay and local journal coverage. Missing local history is cached atomically as a nonpending record before the editor changes; repeated imports preserve the journal and original receipts. The planning helper isolates binary validation from session lifecycle handling, and recovery UI/HTTP guards reuse the shared size constants.
+
+Fresh checks ran in an isolated fix worktree based on PR #24 at `1ac90d8`, using the existing local Node/pnpm, PostgreSQL and Chromium setup with disposable test data. Two new offline-reopen regressions failed before the fix, covering inserted and deleted text. After the fix, all 21 session-recovery checks passed, including repeated import and transaction abort. `pnpm typecheck`, `pnpm test` (183 passed; 49 opt-in PostgreSQL checks skipped), production build, and `git diff --check` passed.
+
+All seven authenticated recovery browser scenarios passed against real Better Auth sessions and the backend/database. The new scenario allows a fresh HTTP committed-state read while blocking WebSocket reconnect, imports already committed content into a stale cache, and verifies it survives an offline reload without another server write. The existing suite also covers older-server recovery, exact receipts, concurrent edits, private copies, response loss and account replacement.
+
+No dependency, document/protocol/database version or hosted configuration changed. Standalone PostgreSQL integration, restore and unrelated browser suites were not repeated for this client fix. The production build still reports the existing large-chunk advisory. These results establish local behavior, not hosted deployment or recovery guarantees.
+
+### Recovery lifecycle quality pass
+
+The recovery dialog no longer pauses or retries the session during mount/cleanup. `Session.importRecovery` owns settling writes, pausing transport and resuming after import; opening or closing a file chooser does not restart synchronization. Native modal/focus behavior and stale-response invalidation remain in the dialog. Fresh typecheck, production build and all seven authenticated recovery browser scenarios passed after this cleanup on 2026-10-09.

@@ -6,6 +6,8 @@ import {
   PROTOCOL_VERSION,
   decodeUpdate,
   encodeUpdate,
+  parseRecoveryFile,
+  validateRecoveryState,
   type ClientMessage,
   type ServerMessage,
 } from '@kikit/contracts';
@@ -17,6 +19,7 @@ import {
 } from './local-store';
 import { SyncClient, type Connection } from './sync-client';
 import { DocumentPresence } from './presence';
+import { planRecoveryImport } from './recovery-plan';
 
 export interface SessionSnapshot {
   ready: boolean;
@@ -36,6 +39,7 @@ export interface DocumentSession {
   getSnapshot(): SessionSnapshot;
   retry(): void;
   exportRecovery(): string;
+  importRecovery(file: string, committedState: Uint8Array): Promise<void>;
   pause(): Promise<void>;
   destroy(): void;
 }
@@ -422,7 +426,8 @@ class Session implements DocumentSession {
     const pendingBatches = [...this.pendingBatches.values(), ...unpersistedBatches];
     return JSON.stringify({
       format: 'kikit-recovery',
-      formatVersion: 1,
+      formatVersion: 2,
+      protocolVersion: PROTOCOL_VERSION,
       schemaVersion: DOCUMENT_SCHEMA_VERSION,
       accountId: this.identity.accountId,
       pageId: this.identity.pageId,
@@ -438,6 +443,33 @@ class Session implements DocumentSession {
         update: encodeUpdate(record.update),
       })),
     }, null, 2);
+  }
+
+  async importRecovery(file: string, committedState: Uint8Array): Promise<void> {
+    const recovery = parseRecoveryFile(file, this.identity);
+    validateRecoveryState(committedState);
+    if (!this.snapshot.ready || this.destroyed || this.incompatibleCache.length) {
+      throw new Error('Open the original note before merging recovery. Keep the file.');
+    }
+    await this.pause();
+    try {
+      if (this.queuedWrites.length || this.appendError || this.receiptError) {
+        throw new Error('Save or download the current draft before importing recovery.');
+      }
+      const stagedJournal = await this.store.load();
+      if (this.destroyed) return;
+      const plan = planRecoveryImport({ currentState: Y.encodeStateAsUpdate(this.doc),
+        journal: stagedJournal, recovery, committedState });
+      const records = [...plan.pendingUpdates, ...(plan.cachedState ? [plan.cachedState] : [])];
+      const journal = await this.store.importUpdates(records, plan.prerequisite, stagedJournal);
+      if (this.destroyed) return; // The committed journal remains recoverable after navigation.
+      for (const record of journal) Y.applyUpdate(this.doc, record.update, REMOTE_UPDATE_ORIGIN);
+      this.pendingBatches.clear();
+      for (const record of journal) if (record.pending) this.pendingBatches.set(record.id, record);
+      this.publish();
+    } finally {
+      this.retry();
+    }
   }
 
   async pause(): Promise<void> {

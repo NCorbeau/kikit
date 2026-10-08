@@ -6,7 +6,7 @@ Accepted on 2026-10-07. This records the user's choices; implementation and host
 
 Only a note's owner may permanently delete it after explicit confirmation. V1 has no Trash, per-note restore or deletion undo. Deletion ends shared access, invalidates the invitation and removes the server's note content, snapshots, update history, receipts and access grants atomically. Minimal page identity/owner/deletion metadata is retained to prevent an old create retry from recreating a deleted note.
 
-Active devices lose editing access; offline devices learn of deletion when they reconnect. Local journals and recoverable drafts are retained rather than automatically cleared. Downloaded copies cannot be recalled. A failed local save must be recovered before the deleting browser can leave its draft. Pending edits cannot synchronize to the deleted page; recovery import is a separate v1 implementation gate.
+Active devices lose editing access; offline devices learn of deletion when they reconnect. Local journals and recoverable drafts are retained rather than automatically cleared. Downloaded copies cannot be recalled. A failed local save must be recovered before the deleting browser can leave its draft. Pending edits cannot synchronize to the deleted page; the [recovery flow](recovery-contract.md) can initialize a distinct private copy.
 
 Pre-deletion backups can contain deleted notes until backup expiry. Disaster recovery is separate from a user-facing Trash feature: reconcile known deletions before reopening a restored system. Restoration can lose deletion records newer than the selected backup within the accepted recovery window; do not claim immediate erasure from every historical copy.
 
