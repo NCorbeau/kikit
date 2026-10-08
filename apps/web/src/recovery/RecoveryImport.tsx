@@ -28,14 +28,12 @@ function ImportDialog({ accountId, pageId, session, onClose, onRecovered }: {
   useLayoutEffect(() => {
     const previous = document.activeElement;
     dialog.current?.showModal();
-    void session?.pause();
     return () => {
       selection.current++;
       dialog.current?.close();
-      session?.retry();
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
-  }, [session]);
+  }, []);
 
   async function select(input: File | undefined) {
     const current = ++selection.current;
