@@ -457,3 +457,11 @@ No dependency, document/protocol/database version or hosted configuration change
 ### Recovery lifecycle quality pass
 
 The recovery dialog no longer pauses or retries the session during mount/cleanup. `Session.importRecovery` owns settling writes, pausing transport and resuming after import; opening or closing a file chooser does not restart synchronization. Native modal/focus behavior and stale-response invalidation remain in the dialog. Fresh typecheck, production build and all seven authenticated recovery browser scenarios passed after this cleanup on 2026-10-09.
+
+## 2026-10-09: Full-stack code quality pass
+
+A read-only reviewer examined every open PR #22–29 against its predecessor and the combined stack against main, covering snapshot persistence, stylesheet organization, recovery, accessibility, failure fixtures, benchmark, release documentation and recording. No new correctness blocker was found. The pass identified focused improvements to lifecycle ownership and duplicated authenticated-browser setup, plus separating offline replay from the benchmark's online typing phase.
+
+The account browser harness and benchmark now share a narrow synthetic magic-link helper. Callers retain server/context lifetime, account tracking, peer allocation and enabled rate limiting. The benchmark's `measureOfflineReplay` owns backlog generation, timing and durable replay verification with explicit sample offset and expected content length; the outer runner owns scenario setup and cleanup. No new framework, dependency, product behavior or schema/version change was introduced.
+
+Fresh typecheck and production build passed. All 23 authenticated browser scenarios passed with the shared helper. The refactored benchmark completed all six original scenarios, verifying 180 paced inputs and 90 offline replay batches with unchanged identities/bytes, exact receipt hashes and sequence increase, and browser/PostgreSQL convergence. Its four memory boundaries and browser-local timing markers remain intact. The raw run is ignored local evidence; earlier published performance figures retain their original measurement conditions. Follow-up read-only review found no actionable issue in these extractions.
