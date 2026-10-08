@@ -10,6 +10,7 @@ import * as Y from 'yjs';
 import { DATABASE_SCHEMA_VERSION, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION } from '@kikit/contracts';
 import { createServer } from '../apps/server/src/app';
 import { migrateDatabase } from '../apps/server/src/migrations';
+import { authenticateBrowser } from '../tests/support/browser-auth';
 
 // Set FFMPEG_BIN to an installed executable when ffmpeg is not on PATH.
 const ffmpeg = process.env.FFMPEG_BIN ?? 'ffmpeg';
@@ -86,25 +87,12 @@ async function record() {
       await context.addInitScript(() => { localStorage.setItem('kikit-sync-details', 'true'); });
       const email = `${name.toLowerCase()}@example.test`;
       const remoteAddress = `127.0.1.${peer}`;
-      const signed = await server!.inject({ method: 'POST', url: '/api/auth/sign-in/magic-link', remoteAddress,
-        headers: { origin }, payload: { email, callbackURL: '/' } });
-      assert.equal(signed.statusCode, 200);
-      const link = new URL(mail.get(email)!);
-      const redeemed = await server!.inject({ url: link.pathname + link.search, remoteAddress });
-      assert.equal(redeemed.statusCode, 302);
-      const raw = redeemed.headers['set-cookie'];
-      const values = (Array.isArray(raw) ? raw : [raw]).filter(Boolean).map(String);
-      const cookie = values.map(value => value.split(';')[0]).join('; ');
-      await context.addCookies(values.map(value => {
-        const pair = value.split(';')[0]!; const split = pair.indexOf('=');
-        return { name: pair.slice(0, split), value: pair.slice(split + 1), url: origin, httpOnly: true, sameSite: 'Lax' as const };
-      }));
+      const identity = await authenticateBrowser({ server: server!, context, origin, email, remoteAddress,
+        getMagicLink: address => mail.get(address) });
       await pool.query('UPDATE auth_user SET name=$2 WHERE email=$1', [email, name]);
-      const identity = await server!.inject({ url: '/api/session', headers: { cookie }, remoteAddress });
-      assert.equal(identity.statusCode, 200);
       const page = await context.newPage(); await page.goto(origin);
       await expect(page.getByRole('heading', { name: 'Your notes' })).toBeVisible();
-      return { context, page, accountId: identity.json().accountId as string, cookie };
+      return { context, page, accountId: identity.accountId, cookie: identity.cookie };
     }
     phase = 'synthetic authentication and private note setup';
     const alex = await account('Alex', 111, 'light');
