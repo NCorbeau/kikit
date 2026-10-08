@@ -2,7 +2,7 @@ name: Quality checks
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, 'dev/v1-*']
   push:
     branches: [main]
   workflow_dispatch:
