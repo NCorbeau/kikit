@@ -1,4 +1,4 @@
-import { pageSummarySchema, pageSessionSchema, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, decodeUpdate, validateRecoveryState } from '@kikit/contracts';
+import { pageSummarySchema, pageSessionSchema, DOCUMENT_SCHEMA_VERSION, PROTOCOL_VERSION, MAX_DOCUMENT_BYTES, decodeUpdate, validateRecoveryState } from '@kikit/contracts';
 
 export async function checkRecoveryAccess(pageId: string, accountId: string): Promise<Uint8Array> {
   const response = await fetch(`/api/pages/${pageId}/recovery-state`, { headers: { 'X-Kikit-Account': accountId }, credentials: 'same-origin', cache: 'no-store' });
@@ -16,7 +16,7 @@ export async function checkRecoveryAccess(pageId: string, accountId: string): Pr
     window.dispatchEvent(new Event('kikit-session-ended'));
     throw new Error('Your account changed. Reopen your notes.');
   }
-  if (typeof body.update !== 'string' || body.update.length > Math.ceil(2 * 1024 * 1024 / 3) * 4) {
+  if (typeof body.update !== 'string' || body.update.length > Math.ceil(MAX_DOCUMENT_BYTES / 3) * 4) {
     throw new Error('Committed recovery state is invalid. Keep the file and try again.');
   }
   const update = decodeUpdate(body.update);
