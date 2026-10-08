@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type pg from 'pg';
 import { DOCUMENT_SCHEMA_VERSION, type PageSummary } from '@kikit/contracts';
@@ -20,7 +20,7 @@ export async function lockSession(db: NodePgDatabase, principal: Principal): Pro
 
 /** All page transactions lock session -> page -> grants/invitation in this order. */
 export async function lockPage(db: NodePgDatabase, pageId: string) {
-  const [page] = await db.select().from(pages).where(eq(pages.id, pageId)).for('update');
+  const [page] = await db.select().from(pages).where(and(eq(pages.id, pageId), isNull(pages.deletedAt))).for('update');
   if (!page) throw new AccessError('Page access denied');
   return page;
 }
@@ -32,15 +32,15 @@ export async function canAccessPage(pool: pg.Pool, pageId: string, principal: Pr
   ));
   const rows = principal.sessionId
     ? await query.innerJoin(session, and(eq(session.id, principal.sessionId), eq(session.userId, principal.accountId)))
-      .where(and(eq(pages.id, pageId), sql`${session.expiresAt} > now()`))
-    : await query.where(eq(pages.id, pageId));
+      .where(and(eq(pages.id, pageId), isNull(pages.deletedAt), sql`${session.expiresAt} > now()`))
+    : await query.where(and(eq(pages.id, pageId), isNull(pages.deletedAt)));
   return rows.length > 0;
 }
 
 export async function listPages(pool: pg.Pool, accountId: string): Promise<PageSummary[]> {
   const rows = await drizzle(pool).select({ id: pages.id, title: pages.title, createdAt: pages.createdAt, role: pageGrants.role })
     .from(pages).innerJoin(pageGrants, and(eq(pageGrants.pageId, pages.id), eq(pageGrants.accountId, accountId)))
-    .orderBy(asc(pages.createdAt));
+    .where(isNull(pages.deletedAt)).orderBy(asc(pages.createdAt));
   return rows.map(row => ({ ...row, createdAt: row.createdAt.toISOString() }));
 }
 
@@ -53,10 +53,11 @@ export async function createPage(pool: pg.Pool, id: string, principal: Principal
     const db = drizzle(client);
     await lockSession(db, principal);
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [principal.accountId]);
-    const [existing] = await db.select().from(pages).where(eq(pages.id, id));
-    if (existing && existing.ownerId !== principal.accountId) throw new AccessError('Page access denied');
+    const [existing] = await db.select().from(pages).where(eq(pages.id, id)).for('update');
+    if (existing && (existing.ownerId !== principal.accountId || existing.deletedAt)) throw new AccessError('Page access denied');
     if (!existing) {
-      const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(pages).where(eq(pages.ownerId, principal.accountId));
+      const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(pages)
+        .where(and(eq(pages.ownerId, principal.accountId), isNull(pages.deletedAt)));
       if (total >= 100) throw new Error('The account has reached the 100-note limit.');
       await db.insert(pages).values({ id, ownerId: principal.accountId, schemaVersion: DOCUMENT_SCHEMA_VERSION, initialState: Buffer.from(createSeed('', '')) });
       await db.insert(pageGrants).values({ pageId: id, accountId: principal.accountId, role: 'owner' });

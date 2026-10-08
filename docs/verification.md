@@ -383,3 +383,28 @@ No backend, dependency, document/protocol/database version or durability contrac
 ### PR conflict resolution · 2026-10-05
 
 Merged main `9484244` into the header branch. The only conflict was between appended sections in this verification record; both deployment and header evidence are retained. Fresh typecheck, all 126 fast tests (38 PostgreSQL integration checks skipped), build and `git diff --check` passed. The web source and browser tests are unchanged from `bb37377`, so the 23 fixture and nine authenticated browser results above were not rerun for this documentation resolution. No hosted deployment or additional database/browser/restore check was performed.
+
+## 2026-10-07: CI baseline and permanent deletion
+
+GitHub's cancelled main checks at `0d86fff70f23e6d687e7e0583130921446bdb2d7` never acquired a hosted runner. Retrying the failed jobs produced [run 37374105908, attempt 2](https://github.com/NCorbeau/kikit/actions/runs/37374105908/attempts/2), with all four jobs successful: code quality, PostgreSQL integration/restore, fixture browsers, and authenticated browsers. This is evidence for that exact baseline, not the deletion source below. No workflow change was necessary.
+
+Implemented permanent owner-only deletion in the isolated `dev/v1-release-closure` worktree based on that main revision. The original worktree's uncommitted account-panel CSS is excluded. The [accepted policy](data-policy.md), [deletion contract](deletion-contract.md) and [release checklist](v1-release.md) distinguish local implementation from hosted evidence. Database schema advances to 5; document schema 2 and wire protocol 2 remain unchanged. The forward migration adds a nullable marker without rewriting existing content.
+
+Fresh checks used macOS/Apple Silicon, Node 24, pnpm 12.5.1, loopback PostgreSQL 17.9 and Playwright 1.63.0/Chromium. Database/browser suites ran sequentially on disposable data; authenticated scenarios used distinct Better Auth accounts, captured synthetic delivery and production assets.
+
+| Check | Result |
+| --- | --- |
+| `pnpm typecheck` | Passed |
+| `pnpm test` | 126 passed; 40 opt-in PostgreSQL checks skipped |
+| `pnpm test:integration` | All 40 passed |
+| `pnpm test:e2e` | All 23 fixture editor/failure/recovery scenarios passed |
+| `pnpm test:e2e:accounts` | All 11 account/sharing/presence scenarios passed |
+| `COMPOSE_PROJECT_NAME=kikit pnpm test:restore` | Passed, including retained deletion identity, denied create retry, idempotent delete and restricted runtime permissions after logical restore |
+| `pnpm build` | Passed through authenticated suite; 873.38 kB before gzip/266.78 kB gzip, existing large-chunk advisory |
+| `git diff --check` | Passed |
+
+New PostgreSQL scenarios verify owner/editor/outsider isolation, origin/account binding, active-socket denial, invitation invalidation, atomic removal of content/updates/receipts/grants, repeat deletion, denied recreation, rollback after a real database deletion failure, and locking behind an admitted edit. Browser scenarios verify explicit confirmation/cancel with focus restoration, immediate loss of live editor access, an offline draft's exact pending batch identities surviving reconnect, and export of failed local writes before deletion. A failed deletion request retains the confirmation and permits retry.
+
+The first integration run failed only because the new injected-failure assertion expected the nested PostgreSQL message in Drizzle's wrapper; the corrected assertion and persisted-state checks passed. The first browser run found an ambiguous test selector between the failed-save banner and confirmation download button; explicitly scoping the test to its dialog produced the full passing rerun. These corrections did not change production behavior. Existing upstream task-list selection warnings and failure-test disconnect logs remain.
+
+No normal development database was migrated, no Railway configuration/deployment or paid resource was changed, and no hosted deletion, backup schedule or restore target is established. Recovery import and document snapshots/compaction are required v1 work still to implement. The four-hour recovery target and six-day retention remain targets for the separate hosted drill.

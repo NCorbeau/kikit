@@ -49,6 +49,7 @@ export const pages = pgTable('pages', {
   sequence: bigint('sequence', { mode: 'number' }).notNull().default(0),
   initialState: bytea('initial_state').notNull(),
   createdAt: createdAt(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, table => [index('pages_owner_idx').on(table.ownerId)]);
 
 export const pageGrants = pgTable('page_grants', {

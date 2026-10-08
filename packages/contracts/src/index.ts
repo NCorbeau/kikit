@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const PROTOCOL_VERSION = 2;
 export const DOCUMENT_SCHEMA_VERSION = 2;
-export const DATABASE_SCHEMA_VERSION = 4;
+export const DATABASE_SCHEMA_VERSION = 5;
 export const DEV_ACCOUNT_ID = 'dev-writer';
 export const DEV_PAGE_ID = '00000000-0000-4000-8000-000000000001';
 export const TITLE_FRAGMENT = 'title';

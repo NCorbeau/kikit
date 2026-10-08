@@ -1,7 +1,7 @@
 import { openHeaderMenu, showSyncDetails } from './header-actions';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { expect, type BrowserContext, type Page } from '@playwright/test';
+import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import pg from 'pg';
 import * as Y from 'yjs';
 import { decodeUpdate } from '@kikit/contracts';
@@ -130,10 +130,10 @@ export async function createNote(page: Page, title: string, content: string): Pr
   return new URL(page.url()).hash.split('/').at(-1)!;
 }
 
-export async function downloadRecovery(page: Page, buttonName = 'Download recovery'): Promise<RecoveryFile> {
+export async function downloadRecovery(page: Page, buttonName = 'Download recovery', scope?: Locator): Promise<RecoveryFile> {
   if (buttonName === 'Download recovery file') await openHeaderMenu(page);
   const downloaded = page.waitForEvent('download');
-  await page.getByRole('button', { name: buttonName, exact: true }).click();
+  await (scope ?? page).getByRole('button', { name: buttonName, exact: true }).click();
   const file = await downloaded;
   return JSON.parse(await readFile((await file.path())!, 'utf8')) as RecoveryFile;
 }

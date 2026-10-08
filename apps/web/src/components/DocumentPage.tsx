@@ -7,10 +7,11 @@ import { SaveStatus, hasSaveFailure } from './SaveStatus';
 import { Participants } from './Participants';
 import { useSyncDetails } from './useSyncDetails';
 
-export function DocumentPage({ session, snapshot, shareAction, onSignOut, actionsDisabled, onHome }: {
+export function DocumentPage({ session, snapshot, shareAction, deleteAction, onSignOut, actionsDisabled, onHome }: {
   session: DocumentSession;
   snapshot: SessionSnapshot;
   shareAction?: ReactNode;
+  deleteAction?: ReactNode;
   onSignOut?(): void;
   actionsDisabled?: boolean;
   onHome?(): void;
@@ -47,6 +48,7 @@ export function DocumentPage({ session, snapshot, shareAction, onSignOut, action
         >
           Download recovery file
         </button>
+        {deleteAction}
       </AppHeader>
 
       <main id="writing" className="writing-area" tabIndex={-1}>
