@@ -89,6 +89,38 @@ for (const device of ['fresh', 'cached'] as const) {
   });
 }
 
+test('keeps already committed recovery in a stale cache after an offline reload', async ({ browser }) => {
+  const source = await browser.newContext(), target = await browser.newContext();
+  try {
+    const account = await harness.authenticate(source);
+    await harness.authenticate(target, account.email);
+    const a = await source.newPage(), b = await target.newPage();
+    const id = await createNote(a, 'Committed recovery', 'Cached baseline.');
+    await b.goto(`/#/page/${id}`); await serverSaved(b);
+    await target.setOffline(true);
+    await appendBody(a, ' Already committed recovery.'); await serverSaved(a);
+    const recovery = await downloadRecovery(a, 'Download recovery file');
+    expect(recovery.pending).toHaveLength(0);
+    const file = JSON.stringify(recovery);
+    const before = (await harness.pool.query('SELECT sequence FROM pages WHERE id=$1', [id])).rows[0].sequence;
+
+    // Allow the real HTTP state read, but prevent a reconnect from healing the
+    // stale journal before import or hiding a missing local cache record.
+    await target.routeWebSocket('**/api/sync', route => route.close());
+    await target.setOffline(false);
+    await expect(pageBody(b)).not.toContainText('Already committed recovery.');
+    const dialog = await choose(b, file);
+    await dialog.getByRole('button', { name: 'Merge into this note', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(pageBody(b)).toContainText('Already committed recovery.');
+    await expect(b.getByTestId('save-status')).toHaveText('Saved on this device');
+    await target.setOffline(true); await b.reload();
+    await expect(pageBody(b)).toContainText('Already committed recovery.');
+    expect((await harness.pool.query('SELECT sequence FROM pages WHERE id=$1', [id])).rows[0].sequence).toBe(before);
+    expect(JSON.stringify(recovery)).toBe(file);
+  } finally { await source.close(); await target.close(); }
+});
+
 test('merges an offline recovery into its authorized original with stable receipts, concurrent edits and repeat import', async ({ browser }) => {
   const source = await browser.newContext(), target = await browser.newContext();
   try {

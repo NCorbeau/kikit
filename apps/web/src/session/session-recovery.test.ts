@@ -99,6 +99,52 @@ function outbound(transport: RecoveryTransport) {
 }
 
 describe('recovery import into the original document session', () => {
+  it.each(['inserted text', 'deleted text'])('keeps already committed recovery with %s available after an offline reopen', async edit => {
+    const recovery = source();
+    if (edit === 'deleted text') title(recovery.doc).delete(0, 3);
+    const fullState = Y.encodeStateAsUpdate(recovery.doc);
+    const file = JSON.stringify({ ...JSON.parse(recovery.file()), pending: [] });
+    const { session, store, factory, transport } = await harness(recovery.seed);
+
+    await session.importRecovery(file, fullState);
+    expect(title(session.doc).toString()).toBe(title(recovery.doc).toString());
+    expect(session.getSnapshot()).toMatchObject({ local: 'saved', pending: 0, serverSaved: false });
+    expect(outbound(transport)).toEqual([]);
+    const saved = await store.load();
+    await session.importRecovery(file, fullState);
+    expect(await store.load()).toEqual(saved);
+
+    session.destroy();
+    store.close();
+    const reopenedStore = new LocalStore(identity.accountId, identity.pageId, factory);
+    stores.push(reopenedStore);
+    const reopened = await openSession(reopenedStore);
+    expect(reopened.session.getSnapshot()).toMatchObject({ ready: true, local: 'saved', pending: 0, connection: 'offline' });
+    expect(title(reopened.session.doc).toString()).toBe(title(recovery.doc).toString());
+    expect((reopened.session.doc.getXmlFragment('body').get(0) as Y.XmlElement).getAttribute('id')).toBe('stable-original-block');
+    expect(outbound(reopened.transport)).toEqual([]);
+    expect(JSON.parse(file).pending).toEqual([]);
+  });
+
+  it('retains the original cache and editor when saving already committed recovery aborts', async () => {
+    const recovery = source();
+    const file = JSON.stringify({ ...JSON.parse(recovery.file()), pending: [] });
+    const { session, store, transport } = await harness(recovery.seed);
+    const before = await store.load();
+    const editor = Y.encodeStateAsUpdate(session.doc);
+    const put = IDBObjectStore.prototype.put;
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function(this: IDBObjectStore, ...args) {
+      const request = put.apply(this, args);
+      if (this.name === 'metadata') request.addEventListener('success', () => this.transaction.abort());
+      return request;
+    });
+
+    await expect(session.importRecovery(file, Y.encodeStateAsUpdate(recovery.doc))).rejects.toThrow();
+    expect(await store.load()).toEqual(before);
+    expect(Y.encodeStateAsUpdate(session.doc)).toEqual(editor);
+    expect(outbound(transport)).toEqual([]);
+  });
+
   it('commits exact original pending identities and bytes before changing the editor or sending', async () => {
     const recovery = source();
     const { session, store, transport } = await harness(recovery.seed);
